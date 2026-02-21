@@ -8,9 +8,18 @@ export default defineConfig({
     plugins: [tailwindcss()],
   }),
   manifest: {
+    name: "SmartExtract",
     permissions: ["activeTab", "scripting", "storage"],
     action: {
       default_popup: "entrypoints/popup/index.html",
+      default_icon: "icon.svg",
+    },
+    icons: {
+      "16": "icon.svg",
+      "32": "icon.svg",
+      "48": "icon.svg",
+      "96": "icon.svg",
+      "128": "icon.svg",
     },
   },
 });
