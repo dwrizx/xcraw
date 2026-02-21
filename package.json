@@ -1,0 +1,67 @@
+{
+  "name": "wxt-react-starter",
+  "version": "0.0.0",
+  "private": true,
+  "description": "manifest.json description",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "postinstall": "wxt prepare",
+    "//": "=== Quality Gates ===",
+    "typecheck": "tsgo -p tsconfig.json",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "fmt": "oxfmt .",
+    "fmt:check": "oxfmt --check .",
+    "//2": "=== Bundled Checks ===",
+    "check:fast": "bun run lint && bun run fmt:check",
+    "check": "bun run typecheck && bun run lint && bun run fmt:check",
+    "//3": "=== Convenience ===",
+    "fix": "bun run lint:fix && bun run fmt",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@webext-core/messaging": "^2.3.0",
+    "dompurify": "^3.3.1",
+    "lucide-react": "^0.575.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "turndown": "^7.2.2",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.0",
+    "@types/dompurify": "^3.2.0",
+    "@types/jsdom": "^27.0.0",
+    "@types/mozilla-readability": "^0.2.1",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@types/turndown": "^5.0.6",
+    "@typescript/native-preview": "^7.0.0-dev.20260221.1",
+    "@wxt-dev/module-react": "^1.1.5",
+    "husky": "^9.1.7",
+    "jsdom": "^28.1.0",
+    "lint-staged": "^16.2.7",
+    "oxfmt": "^0.34.0",
+    "oxlint": "^1.49.0",
+    "tailwindcss": "^4.2.0",
+    "typescript": "^5.9.3",
+    "wxt": "^0.20.17"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx,jsx,cjs,mjs}": [
+      "oxlint --fix",
+      "oxfmt"
+    ],
+    "*.{json,jsonc,md,yml,yaml,css,html}": [
+      "oxfmt"
+    ]
+  }
+}
