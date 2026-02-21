@@ -1,6 +1,6 @@
 {
-  "name": "wxt-react-starter",
-  "version": "0.0.0",
+  "name": "smart-extract",
+  "version": "2.4.1",
   "private": true,
   "description": "manifest.json description",
   "type": "module",
