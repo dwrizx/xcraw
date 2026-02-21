@@ -3,7 +3,13 @@ name: Publish Extension
 on:
   push:
     tags:
-      - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 2.4.2)"
+        required: true
+        default: "2.4.2"
 
 jobs:
   build:
@@ -20,12 +26,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Update version in package.json (Manual Only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); pkg.version = '${{ github.event.inputs.version }}'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+
       - name: Build & Zip Extension
         run: bun run zip
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ github.event.inputs.version || github.ref_name }}
           files: |
             .output/*.zip
           generate_release_notes: true
