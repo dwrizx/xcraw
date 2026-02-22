@@ -3,6 +3,9 @@ import type { PendingAIUpload } from "../lib/types";
 const PROMPT_SELECTORS = [
   "#prompt-textarea",
   "textarea#prompt-textarea",
+  '[data-testid="composer-input"]',
+  '[data-testid*="composer"] div[contenteditable="true"]',
+  "div.ProseMirror[contenteditable='true']",
   'div#prompt-textarea[contenteditable="true"]',
   'div[contenteditable="true"][data-testid*="prompt"]',
   'div[contenteditable="true"][aria-label*="Message"]',
@@ -10,6 +13,8 @@ const PROMPT_SELECTORS = [
 
 const SEND_BUTTON_SELECTORS = [
   'button[data-testid="send-button"]',
+  'button[data-testid*="send"]',
+  'button[aria-label*="send"]',
   'button[type="submit"]',
   'button[aria-label*="Send"]',
   'button[aria-label*="Kirim"]',
@@ -99,6 +104,7 @@ function setPromptValue(element: HTMLElement, value: string): void {
       data: value,
     }),
   );
+  element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function attachTextAsFile(
@@ -127,6 +133,19 @@ export default defineContentScript({
         if (sendButton && !sendButton.disabled) {
           sendButton.click();
           return true;
+        }
+
+        const promptInput = getPromptInput();
+        if (promptInput && promptInput instanceof HTMLElement) {
+          promptInput.focus();
+          promptInput.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key: "Enter",
+              code: "Enter",
+            }),
+          );
         }
         return false;
       };

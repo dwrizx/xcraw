@@ -18,6 +18,7 @@ export interface UserSettings {
   customTemplate: string;
   aiProvider: AiProvider;
   aiPrompt: string;
+  enableFileUpload: boolean;
 }
 
 export type AiProvider = "chatgpt" | "gemini";
@@ -60,6 +61,7 @@ Source: [{{url}}]({{url}})
 export const DEFAULT_AI_PROMPT =
   "Tolong ringkas teks berikut dalam 5 poin utama yang sangat jelas dan mudah dipahami:";
 export const DEFAULT_AI_PROVIDER: AiProvider = "chatgpt";
+export const DEFAULT_ENABLE_FILE_UPLOAD = true;
 export const DEFAULT_AI_URL = "https://chatgpt.com/";
 export const AI_PROVIDER_URLS: Record<AiProvider, string> = {
   chatgpt: "https://chatgpt.com/",

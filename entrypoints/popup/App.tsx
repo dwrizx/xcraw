@@ -9,6 +9,7 @@ import type {
 } from "@/lib/types";
 import {
   AI_PROVIDER_URLS,
+  DEFAULT_ENABLE_FILE_UPLOAD,
   DEFAULT_AI_PROVIDER,
   DEFAULT_TEMPLATE,
   DEFAULT_AI_PROMPT,
@@ -64,6 +65,8 @@ import {
   AlertTriangle,
   PlusCircle,
   Bookmark,
+  Link2,
+  Globe,
 } from "lucide-react";
 import "./App.css";
 
@@ -74,13 +77,23 @@ interface SavedPrompt {
   createdAt: number;
 }
 
+interface SavedAiUrl {
+  id: string;
+  name: string;
+  url: string;
+  provider: AiProvider;
+  createdAt: number;
+}
+
 function App() {
   const LOCAL_UI_KEY = "smartExtract.uiState";
   const LOCAL_DRAFT_KEY = "smartExtract.draftSettings";
   const LOCAL_PROMPT_LIBRARY_KEY = "smartExtract.promptLibrary";
+  const LOCAL_AI_URL_LIBRARY_KEY = "smartExtract.aiUrlLibrary";
   const LOCAL_EXTRACTION_CACHE_KEY = "smartExtract.extractionCacheByUrl";
   const MAX_HISTORY = 50;
   const MAX_CUSTOM_PROMPTS = 20;
+  const MAX_CUSTOM_URLS = 20;
   const MAX_URL_CACHE = 150;
 
   const [extractedData, setExtractedData] = useState<ExtractionResult | null>(
@@ -103,11 +116,18 @@ function App() {
   const [customTemplate, setCustomTemplate] = useState(DEFAULT_TEMPLATE);
   const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
   const [aiProvider, setAiProvider] = useState<AiProvider>(DEFAULT_AI_PROVIDER);
+  const [enableFileUpload, setEnableFileUpload] = useState(
+    DEFAULT_ENABLE_FILE_UPLOAD,
+  );
   const [selectedPromptTemplate, setSelectedPromptTemplate] =
     useState("summary_5_points");
   const [aiUrl, setAiUrl] = useState(DEFAULT_AI_URL);
   const [templateSaved, setTemplateSaved] = useState(false);
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [savedAiUrls, setSavedAiUrls] = useState<SavedAiUrl[]>([]);
+  const [activeSavedUrlId, setActiveSavedUrlId] = useState<string | null>(null);
+  const [newAiUrlName, setNewAiUrlName] = useState("");
+  const [urlWarning, setUrlWarning] = useState<string | null>(null);
   const [newPromptName, setNewPromptName] = useState("");
   const [newPromptText, setNewPromptText] = useState("");
   const [promptWarning, setPromptWarning] = useState<string | null>(null);
@@ -127,18 +147,21 @@ function App() {
       customTemplate: string;
       aiPrompt: string;
       aiProvider: AiProvider;
+      enableFileUpload: boolean;
       selectedPromptTemplate: string;
       aiUrl: string;
     }>(LOCAL_DRAFT_KEY, {
       customTemplate: DEFAULT_TEMPLATE,
       aiPrompt: DEFAULT_AI_PROMPT,
       aiProvider: DEFAULT_AI_PROVIDER,
+      enableFileUpload: DEFAULT_ENABLE_FILE_UPLOAD,
       selectedPromptTemplate: "summary_5_points",
       aiUrl: DEFAULT_AI_URL,
     });
     setCustomTemplate(draftSettings.customTemplate);
     setAiPrompt(draftSettings.aiPrompt);
     setAiProvider(draftSettings.aiProvider);
+    setEnableFileUpload(draftSettings.enableFileUpload);
     setSelectedPromptTemplate(draftSettings.selectedPromptTemplate);
     setAiUrl(draftSettings.aiUrl);
     setSavedPrompts(
@@ -146,6 +169,17 @@ function App() {
         0,
         MAX_CUSTOM_PROMPTS,
       ),
+    );
+    setSavedAiUrls(
+      loadLocalState<SavedAiUrl[]>(LOCAL_AI_URL_LIBRARY_KEY, [])
+        .map((item) => ({
+          ...item,
+          provider:
+            item.provider === "gemini" || item.provider === "chatgpt"
+              ? item.provider
+              : DEFAULT_AI_PROVIDER,
+        }))
+        .slice(0, MAX_CUSTOM_URLS),
     );
     setExtractionCache(
       loadLocalState<ExtractionCacheMap>(LOCAL_EXTRACTION_CACHE_KEY, {}),
@@ -199,6 +233,7 @@ function App() {
         "customTemplate",
         "aiPrompt",
         "aiProvider",
+        "enableFileUpload",
         "selectedPromptTemplate",
         "aiUrl",
       ])
@@ -207,12 +242,16 @@ function App() {
           customTemplate?: string;
           aiPrompt?: string;
           aiProvider?: AiProvider;
+          enableFileUpload?: boolean;
           selectedPromptTemplate?: string;
           aiUrl?: string;
         };
         if (data.customTemplate) setCustomTemplate(data.customTemplate);
         if (data.aiPrompt) setAiPrompt(data.aiPrompt);
         if (data.aiProvider) setAiProvider(data.aiProvider);
+        if (typeof data.enableFileUpload === "boolean") {
+          setEnableFileUpload(data.enableFileUpload);
+        }
         if (data.selectedPromptTemplate) {
           setSelectedPromptTemplate(data.selectedPromptTemplate);
         }
@@ -231,6 +270,26 @@ function App() {
         }
       })
       .catch(console.error);
+
+    browser.storage.sync
+      .get(["customAiUrlLibrary"])
+      .then((res) => {
+        const data = res as { customAiUrlLibrary?: SavedAiUrl[] };
+        if (Array.isArray(data.customAiUrlLibrary)) {
+          setSavedAiUrls(
+            data.customAiUrlLibrary
+              .map((item) => ({
+                ...item,
+                provider:
+                  item.provider === "gemini" || item.provider === "chatgpt"
+                    ? item.provider
+                    : DEFAULT_AI_PROVIDER,
+              }))
+              .slice(0, MAX_CUSTOM_URLS),
+          );
+        }
+      })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -242,10 +301,18 @@ function App() {
       customTemplate,
       aiPrompt,
       aiProvider,
+      enableFileUpload,
       selectedPromptTemplate,
       aiUrl,
     });
-  }, [customTemplate, aiPrompt, aiProvider, selectedPromptTemplate, aiUrl]);
+  }, [
+    customTemplate,
+    aiPrompt,
+    aiProvider,
+    enableFileUpload,
+    selectedPromptTemplate,
+    aiUrl,
+  ]);
 
   useEffect(() => {
     saveLocalState(LOCAL_PROMPT_LIBRARY_KEY, savedPrompts);
@@ -257,6 +324,29 @@ function App() {
   }, [savedPrompts]);
 
   useEffect(() => {
+    saveLocalState(LOCAL_AI_URL_LIBRARY_KEY, savedAiUrls);
+    if (typeof browser !== "undefined" && browser.storage?.sync) {
+      browser.storage.sync
+        .set({ customAiUrlLibrary: savedAiUrls })
+        .catch(console.error);
+    }
+  }, [savedAiUrls]);
+
+  useEffect(() => {
+    const normalizedCurrent = sanitizeAiUrl(aiUrl);
+    if (!normalizedCurrent) {
+      setActiveSavedUrlId(null);
+      return;
+    }
+    const active = savedAiUrls.find(
+      (item) =>
+        item.provider === aiProvider &&
+        sanitizeAiUrl(item.url) === normalizedCurrent,
+    );
+    setActiveSavedUrlId(active?.id ?? null);
+  }, [aiProvider, aiUrl, savedAiUrls]);
+
+  useEffect(() => {
     saveLocalState(LOCAL_EXTRACTION_CACHE_KEY, extractionCache);
   }, [extractionCache]);
 
@@ -265,9 +355,11 @@ function App() {
       customTemplate,
       aiPrompt,
       aiProvider,
+      enableFileUpload,
       selectedPromptTemplate,
       aiUrl,
       customPromptLibrary: savedPrompts,
+      customAiUrlLibrary: savedAiUrls,
     });
     setTemplateSaved(true);
     setTimeout(() => setTemplateSaved(false), 2000);
@@ -277,13 +369,86 @@ function App() {
     setCustomTemplate(DEFAULT_TEMPLATE);
     setAiPrompt(DEFAULT_AI_PROMPT);
     setAiProvider(DEFAULT_AI_PROVIDER);
+    setEnableFileUpload(DEFAULT_ENABLE_FILE_UPLOAD);
     setSelectedPromptTemplate("summary_5_points");
     setAiUrl(AI_PROVIDER_URLS[DEFAULT_AI_PROVIDER]);
   };
 
   const applyProvider = (provider: AiProvider) => {
     setAiProvider(provider);
-    setAiUrl(AI_PROVIDER_URLS[provider]);
+    const firstForProvider = savedAiUrls.find(
+      (item) => item.provider === provider,
+    );
+    setAiUrl(firstForProvider?.url ?? AI_PROVIDER_URLS[provider]);
+    setUrlWarning(null);
+  };
+
+  const sanitizeAiUrl = (rawUrl: string): string | null => {
+    const value = rawUrl.trim();
+    if (!value) return null;
+    try {
+      const parsed = new URL(value);
+      if (!/^https?:$/.test(parsed.protocol)) return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+
+  const applySavedAiUrl = (item: SavedAiUrl) => {
+    const sanitized = sanitizeAiUrl(item.url);
+    if (!sanitized) {
+      setUrlWarning("URL tersimpan tidak valid. Hapus lalu simpan ulang.");
+      return;
+    }
+    setAiProvider(item.provider);
+    setAiUrl(sanitized);
+    setActiveSavedUrlId(item.id);
+    setUrlWarning(null);
+  };
+
+  const handleSaveAiUrl = () => {
+    const sanitizedUrl = sanitizeAiUrl(aiUrl);
+    const name = newAiUrlName.trim();
+    if (!sanitizedUrl) {
+      setUrlWarning("URL tidak valid. Gunakan format https://...");
+      return;
+    }
+    if (name.length < 3) {
+      setUrlWarning("Nama URL minimal 3 karakter.");
+      return;
+    }
+
+    setSavedAiUrls((prev) => {
+      const existing = prev.find(
+        (item) =>
+          item.provider === aiProvider &&
+          item.name.toLowerCase() === name.toLowerCase(),
+      );
+      const nextItem: SavedAiUrl = existing
+        ? { ...existing, url: sanitizedUrl }
+        : {
+            id: `url_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            url: sanitizedUrl,
+            provider: aiProvider,
+            createdAt: Date.now(),
+          };
+
+      const filtered = prev.filter((item) => item.id !== nextItem.id);
+      return [nextItem, ...filtered].slice(0, MAX_CUSTOM_URLS);
+    });
+    setAiUrl(sanitizedUrl);
+    setActiveSavedUrlId(null);
+    setNewAiUrlName("");
+    setUrlWarning(null);
+  };
+
+  const handleDeleteAiUrl = (id: string) => {
+    setSavedAiUrls((prev) => prev.filter((item) => item.id !== id));
+    if (activeSavedUrlId === id) {
+      setActiveSavedUrlId(null);
+    }
   };
 
   const applyPromptTemplate = (templateId: string) => {
@@ -422,22 +587,24 @@ function App() {
         await browser.storage.local.set({
           pendingAIUpload: {
             provider: aiProvider,
-            text: aiProvider === "chatgpt" ? fullText : undefined,
+            text:
+              aiProvider === "chatgpt" && enableFileUpload
+                ? fullText
+                : undefined,
             prompt: finalPrompt,
             title: extractedData.title,
           },
         });
       }
 
-      const baseUrl = aiUrl.split("?")[0];
-      window.open(baseUrl, "_blank");
+      window.open(aiUrl, "_blank");
     } catch (err) {
       console.error("Failed to save to storage:", err);
       navigator.clipboard.writeText(finalPrompt);
       alert(
         "Gagal menyiapkan file otomatis. Prompt sudah disalin ke Clipboard. Silakan paste (Ctrl+V) manual di ChatGPT.",
       );
-      window.open(aiUrl.split("?")[0], "_blank");
+      window.open(aiUrl, "_blank");
     }
   };
 
@@ -643,6 +810,123 @@ function App() {
                 onChange={(e) => setAiUrl(e.target.value)}
                 placeholder={AI_PROVIDER_URLS[aiProvider]}
               />
+              <p className="mt-1 text-[9px] text-slate-500">
+                Contoh ChatGPT valid: <code>https://chatgpt.com/c/...</code>,{" "}
+                <code>https://chatgpt.com/g/.../project</code>,{" "}
+                <code>https://chatgpt.com/g/.../c/...</code>
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-700 dark:text-slate-200">
+                    Upload File ke AI
+                  </p>
+                  <p className="text-[9px] text-slate-500 mt-1">
+                    Jika aktif, hasil extract dikirim sebagai lampiran file
+                    (khusus ChatGPT).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEnableFileUpload((prev) => !prev)}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${
+                    enableFileUpload
+                      ? "bg-emerald-500"
+                      : "bg-slate-300 dark:bg-slate-600"
+                  }`}
+                  title="Toggle upload file"
+                  aria-pressed={enableFileUpload}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                      enableFileUpload ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3 bg-white/70 dark:bg-slate-900/40">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Simpan URL Tujuan
+              </p>
+              <input
+                type="text"
+                value={newAiUrlName}
+                onChange={(e) => setNewAiUrlName(e.target.value)}
+                placeholder="Nama URL (contoh: Project Menulis)"
+                className="w-full p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+              />
+              {urlWarning && (
+                <p className="text-[10px] text-red-600 dark:text-red-400 font-semibold">
+                  {urlWarning}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveAiUrl}
+                className="w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
+              >
+                <Link2 className="w-4 h-4" />
+                Simpan URL Ini
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                Saved Provider URLs
+              </label>
+              {savedAiUrls.length === 0 && (
+                <p className="text-[10px] text-slate-500">
+                  Belum ada URL tersimpan.
+                </p>
+              )}
+              {savedAiUrls.map((item) => (
+                <div
+                  key={item.id}
+                  className={`rounded-lg border p-2 ${
+                    activeSavedUrlId === item.id
+                      ? "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-900/20"
+                      : "border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/70"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold truncate flex items-center gap-1.5">
+                        <Globe className="w-3.5 h-3.5" />
+                        {item.name}
+                        {activeSavedUrlId === item.id && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[8px] uppercase tracking-wider">
+                            Aktif
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[9px] text-slate-500 truncate mt-1">
+                        {item.url}
+                      </p>
+                      <p className="text-[9px] text-slate-400 mt-1 uppercase">
+                        {item.provider}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => applySavedAiUrl(item)}
+                        className="px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-[9px] font-bold"
+                      >
+                        Gunakan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAiUrl(item.id)}
+                        className="p-1 rounded-md bg-red-50 text-red-600"
+                        title="Hapus URL"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
             <div>
               <label className="block text-[10px] font-semibold mb-2 text-slate-600 dark:text-slate-400">
@@ -656,13 +940,20 @@ function App() {
                     onClick={() => applyPromptTemplate(template.id)}
                     className={`text-left p-2 rounded-lg border transition-all ${
                       selectedPromptTemplate === template.id
-                        ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
+                        ? "bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-sm"
                         : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 text-[10px] font-bold">
-                      {renderPromptIcon(template.icon)}
-                      <span>{template.label}</span>
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
+                      <span className="flex items-center gap-1.5">
+                        {renderPromptIcon(template.icon)}
+                        <span>{template.label}</span>
+                      </span>
+                      {selectedPromptTemplate === template.id && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[8px] uppercase tracking-wider">
+                          Aktif
+                        </span>
+                      )}
                     </div>
                     <p className="mt-1 text-[9px] leading-snug opacity-80">
                       {template.description}
