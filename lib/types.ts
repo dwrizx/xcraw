@@ -17,11 +17,18 @@ export interface ExtractorMessage {
 export interface UserSettings {
   customTemplate: string;
   aiProvider: AiProvider;
+  customProviderName: string;
   aiPrompt: string;
   enableFileUpload: boolean;
 }
 
-export type AiProvider = "chatgpt" | "gemini" | "grok" | "claude" | "aistudio";
+export type AiProvider =
+  | "chatgpt"
+  | "gemini"
+  | "grok"
+  | "claude"
+  | "aistudio"
+  | "custom";
 
 export interface PendingAIUpload {
   provider: AiProvider;
@@ -62,11 +69,13 @@ export const DEFAULT_AI_PROMPT =
   "Tolong ringkas teks berikut dalam 5 poin utama yang sangat jelas dan mudah dipahami:";
 export const DEFAULT_AI_PROVIDER: AiProvider = "chatgpt";
 export const DEFAULT_ENABLE_FILE_UPLOAD = true;
+export const DEFAULT_CUSTOM_PROVIDER_NAME = "Custom Provider";
 export const DEFAULT_AI_URL = "https://chatgpt.com/";
 export const AI_PROVIDER_URLS: Record<AiProvider, string> = {
   chatgpt: "https://chatgpt.com/",
   gemini: "https://gemini.google.com/app?hl=id",
   grok: "https://grok.com/",
   claude: "https://claude.ai/new",
-  aistudio: "https://aistudio.google.com/",
+  aistudio: "https://aistudio.google.com/prompts/new_chat",
+  custom: "https://example.com/",
 };

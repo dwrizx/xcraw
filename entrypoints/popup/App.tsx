@@ -9,6 +9,7 @@ import type {
 } from "@/lib/types";
 import {
   AI_PROVIDER_URLS,
+  DEFAULT_CUSTOM_PROVIDER_NAME,
   DEFAULT_ENABLE_FILE_UPLOAD,
   DEFAULT_AI_PROVIDER,
   DEFAULT_TEMPLATE,
@@ -97,6 +98,7 @@ const AI_PROVIDER_OPTIONS: Array<{
   { id: "grok", label: "Grok", subtitle: "xAI Grok" },
   { id: "claude", label: "Claude", subtitle: "Anthropic Claude" },
   { id: "aistudio", label: "AI Studio", subtitle: "Google AI Studio" },
+  { id: "custom", label: "Custom", subtitle: "Provider URL Kustom" },
 ];
 
 function App() {
@@ -130,6 +132,9 @@ function App() {
   const [customTemplate, setCustomTemplate] = useState(DEFAULT_TEMPLATE);
   const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
   const [aiProvider, setAiProvider] = useState<AiProvider>(DEFAULT_AI_PROVIDER);
+  const [customProviderName, setCustomProviderName] = useState(
+    DEFAULT_CUSTOM_PROVIDER_NAME,
+  );
   const [enableFileUpload, setEnableFileUpload] = useState(
     DEFAULT_ENABLE_FILE_UPLOAD,
   );
@@ -163,6 +168,7 @@ function App() {
       customTemplate: string;
       aiPrompt: string;
       aiProvider: AiProvider;
+      customProviderName: string;
       enableFileUpload: boolean;
       selectedPromptTemplate: string;
       aiUrl: string;
@@ -170,6 +176,7 @@ function App() {
       customTemplate: DEFAULT_TEMPLATE,
       aiPrompt: DEFAULT_AI_PROMPT,
       aiProvider: DEFAULT_AI_PROVIDER,
+      customProviderName: DEFAULT_CUSTOM_PROVIDER_NAME,
       enableFileUpload: DEFAULT_ENABLE_FILE_UPLOAD,
       selectedPromptTemplate: "summary_5_points",
       aiUrl: DEFAULT_AI_URL,
@@ -180,6 +187,9 @@ function App() {
       draftSettings.aiProvider in AI_PROVIDER_URLS
         ? draftSettings.aiProvider
         : DEFAULT_AI_PROVIDER,
+    );
+    setCustomProviderName(
+      draftSettings.customProviderName || DEFAULT_CUSTOM_PROVIDER_NAME,
     );
     setEnableFileUpload(draftSettings.enableFileUpload);
     setSelectedPromptTemplate(draftSettings.selectedPromptTemplate);
@@ -253,6 +263,7 @@ function App() {
         "customTemplate",
         "aiPrompt",
         "aiProvider",
+        "customProviderName",
         "enableFileUpload",
         "selectedPromptTemplate",
         "aiUrl",
@@ -262,6 +273,7 @@ function App() {
           customTemplate?: string;
           aiPrompt?: string;
           aiProvider?: AiProvider;
+          customProviderName?: string;
           enableFileUpload?: boolean;
           selectedPromptTemplate?: string;
           aiUrl?: string;
@@ -274,6 +286,9 @@ function App() {
               ? data.aiProvider
               : DEFAULT_AI_PROVIDER,
           );
+        }
+        if (data.customProviderName) {
+          setCustomProviderName(data.customProviderName);
         }
         if (typeof data.enableFileUpload === "boolean") {
           setEnableFileUpload(data.enableFileUpload);
@@ -327,6 +342,7 @@ function App() {
       customTemplate,
       aiPrompt,
       aiProvider,
+      customProviderName,
       enableFileUpload,
       selectedPromptTemplate,
       aiUrl,
@@ -335,6 +351,7 @@ function App() {
     customTemplate,
     aiPrompt,
     aiProvider,
+    customProviderName,
     enableFileUpload,
     selectedPromptTemplate,
     aiUrl,
@@ -381,6 +398,7 @@ function App() {
       customTemplate,
       aiPrompt,
       aiProvider,
+      customProviderName,
       enableFileUpload,
       selectedPromptTemplate,
       aiUrl,
@@ -395,6 +413,7 @@ function App() {
     setCustomTemplate(DEFAULT_TEMPLATE);
     setAiPrompt(DEFAULT_AI_PROMPT);
     setAiProvider(DEFAULT_AI_PROVIDER);
+    setCustomProviderName(DEFAULT_CUSTOM_PROVIDER_NAME);
     setEnableFileUpload(DEFAULT_ENABLE_FILE_UPLOAD);
     setSelectedPromptTemplate("summary_5_points");
     setAiUrl(AI_PROVIDER_URLS[DEFAULT_AI_PROVIDER]);
@@ -596,6 +615,7 @@ function App() {
     if (provider === "gemini") return <Bot className="w-3.5 h-3.5" />;
     if (provider === "grok") return <Cpu className="w-3.5 h-3.5" />;
     if (provider === "claude") return <Sparkles className="w-3.5 h-3.5" />;
+    if (provider === "custom") return <Globe className="w-3.5 h-3.5" />;
     return <FlaskConical className="w-3.5 h-3.5" />;
   };
 
@@ -662,24 +682,34 @@ function App() {
       siteName: extractedData.siteName,
       url: extractedData.url,
     });
+    const canAutoInject = aiProvider !== "custom";
 
     try {
       if (typeof browser !== "undefined" && browser.storage) {
-        await browser.storage.local.set({
-          pendingAIUpload: {
-            provider: aiProvider,
-            text:
-              (aiProvider === "chatgpt" || aiProvider === "gemini") &&
-              enableFileUpload
-                ? fullText
-                : undefined,
-            prompt: finalPrompt,
-            title: extractedData.title,
-          },
-        });
+        if (canAutoInject) {
+          await browser.storage.local.set({
+            pendingAIUpload: {
+              provider: aiProvider,
+              text:
+                (aiProvider === "chatgpt" || aiProvider === "gemini") &&
+                enableFileUpload
+                  ? fullText
+                  : undefined,
+              prompt: finalPrompt,
+              title: extractedData.title,
+            },
+          });
+        } else {
+          await navigator.clipboard.writeText(finalPrompt);
+        }
       }
 
       window.open(aiUrl, "_blank");
+      if (!canAutoInject) {
+        alert(
+          "Provider kustom tidak mendukung autofill otomatis. Prompt sudah disalin ke clipboard, silakan paste manual.",
+        );
+      }
     } catch (err) {
       console.error("Failed to save to storage:", err);
       navigator.clipboard.writeText(finalPrompt);
@@ -862,15 +892,37 @@ function App() {
                   >
                     <p className="text-[10px] font-bold flex items-center gap-1.5">
                       {renderProviderIcon(providerOption.id)}
-                      {providerOption.label}
+                      {providerOption.id === "custom"
+                        ? customProviderName
+                        : providerOption.label}
                     </p>
                     <p className="text-[9px] mt-1 opacity-80">
-                      {providerOption.subtitle}
+                      {providerOption.id === "custom"
+                        ? "Provider AI kustom"
+                        : providerOption.subtitle}
                     </p>
                   </button>
                 ))}
               </div>
             </div>
+            {aiProvider === "custom" && (
+              <div>
+                <label className="block text-[10px] font-semibold mb-1 text-slate-600 dark:text-slate-400">
+                  Nama Custom Provider
+                </label>
+                <input
+                  type="text"
+                  className="w-full p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+                  value={customProviderName}
+                  onChange={(e) =>
+                    setCustomProviderName(
+                      e.target.value || DEFAULT_CUSTOM_PROVIDER_NAME,
+                    )
+                  }
+                  placeholder="Contoh: My Company AI"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-[10px] font-semibold mb-1 text-slate-600 dark:text-slate-400">
                 AI Tool URL
