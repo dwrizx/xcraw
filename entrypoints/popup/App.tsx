@@ -21,6 +21,11 @@ import {
   insertHistoryEntry,
   removeHistoryEntry,
 } from "@/lib/history-utils";
+import type { ExtractionCacheMap } from "@/lib/extraction-cache";
+import {
+  getCachedExtractionForUrl,
+  upsertCachedExtraction,
+} from "@/lib/extraction-cache";
 import {
   PROMPT_TEMPLATES,
   buildPromptWithContext,
@@ -43,6 +48,7 @@ import {
   Trash2,
   AlertCircle,
   Sparkles,
+  Database,
   Settings,
   ChevronLeft,
   RotateCcw,
@@ -72,8 +78,10 @@ function App() {
   const LOCAL_UI_KEY = "smartExtract.uiState";
   const LOCAL_DRAFT_KEY = "smartExtract.draftSettings";
   const LOCAL_PROMPT_LIBRARY_KEY = "smartExtract.promptLibrary";
+  const LOCAL_EXTRACTION_CACHE_KEY = "smartExtract.extractionCacheByUrl";
   const MAX_HISTORY = 50;
   const MAX_CUSTOM_PROMPTS = 20;
+  const MAX_URL_CACHE = 150;
 
   const [extractedData, setExtractedData] = useState<ExtractionResult | null>(
     null,
@@ -85,6 +93,10 @@ function App() {
   const [wasAutoCopied, setWasAutoCopied] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [extractionCache, setExtractionCache] = useState<ExtractionCacheMap>(
+    {},
+  );
+  const [servedFromCache, setServedFromCache] = useState(false);
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
@@ -135,6 +147,9 @@ function App() {
         MAX_CUSTOM_PROMPTS,
       ),
     );
+    setExtractionCache(
+      loadLocalState<ExtractionCacheMap>(LOCAL_EXTRACTION_CACHE_KEY, {}),
+    );
 
     loadHistoryFromDb()
       .then((entries) => setHistory(entries))
@@ -160,6 +175,22 @@ function App() {
           saveHistoryToDb(next).catch(console.error);
           return next;
         });
+      })
+      .catch(console.error);
+
+    browser.tabs
+      .query({ active: true, currentWindow: true })
+      .then((tabs) => {
+        const activeUrl = tabs[0]?.url;
+        if (!activeUrl) return;
+        const cached = getCachedExtractionForUrl(
+          loadLocalState<ExtractionCacheMap>(LOCAL_EXTRACTION_CACHE_KEY, {}),
+          activeUrl,
+        );
+        if (cached) {
+          setExtractedData((prev) => prev ?? cached);
+          setServedFromCache(true);
+        }
       })
       .catch(console.error);
 
@@ -224,6 +255,10 @@ function App() {
         .catch(console.error);
     }
   }, [savedPrompts]);
+
+  useEffect(() => {
+    saveLocalState(LOCAL_EXTRACTION_CACHE_KEY, extractionCache);
+  }, [extractionCache]);
 
   const saveSettings = async () => {
     await browser.storage.sync.set({
@@ -435,6 +470,7 @@ function App() {
     setError(null);
     setCopied(false);
     setWasAutoCopied(false);
+    setServedFromCache(false);
 
     try {
       const [tab] = await browser.tabs.query({
@@ -442,9 +478,21 @@ function App() {
         currentWindow: true,
       });
       if (!tab?.id || !tab.url) throw new Error("No active tab found.");
+
+      const cached = getCachedExtractionForUrl(extractionCache, tab.url);
+      if (cached) {
+        setExtractedData(cached);
+        setServedFromCache(true);
+        return;
+      }
+
       const result = await safeSendMessage(tab.id, "extractContent");
-      if (result) persistExtraction(result, "full", format);
-      else throw new Error("No readable content found.");
+      if (result) {
+        persistExtraction(result, "full", format);
+        setExtractionCache((prev) =>
+          upsertCachedExtraction(prev, tab.url!, result, MAX_URL_CACHE),
+        );
+      } else throw new Error("No readable content found.");
     } catch (err: any) {
       setError(err.message || "Extraction failed.");
     } finally {
@@ -456,6 +504,7 @@ function App() {
     setLoading(true);
     setError(null);
     setWasAutoCopied(false);
+    setServedFromCache(false);
     try {
       const [tab] = await browser.tabs.query({
         active: true,
@@ -927,6 +976,11 @@ function App() {
             {/* Metadata Card */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xl border-l-4 border-l-blue-600 relative group">
               <div className="absolute top-0 right-0 p-3 flex gap-2">
+                {servedFromCache && (
+                  <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 text-[9px] font-bold rounded-full animate-in zoom-in">
+                    <Database className="w-2.5 h-2.5" /> From Cache
+                  </div>
+                )}
                 {wasAutoCopied && (
                   <div className="flex items-center gap-1 px-2 py-0.5 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-[9px] font-bold rounded-full animate-in zoom-in">
                     <Sparkles className="w-2.5 h-2.5" /> Auto-copied
