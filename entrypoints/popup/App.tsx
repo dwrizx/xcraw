@@ -19,6 +19,11 @@ import {
   removeHistoryEntry,
 } from "@/lib/history-utils";
 import {
+  PROMPT_TEMPLATES,
+  buildPromptWithContext,
+  getPromptTemplateById,
+} from "@/lib/ai-prompts";
+import {
   FileText,
   Copy,
   Check,
@@ -42,13 +47,29 @@ import {
   BrainCircuit,
   MessageSquare,
   History,
+  BookOpen,
+  Layers,
+  Lightbulb,
+  List,
+  AlertTriangle,
+  PlusCircle,
+  Bookmark,
 } from "lucide-react";
 import "./App.css";
+
+interface SavedPrompt {
+  id: string;
+  name: string;
+  prompt: string;
+  createdAt: number;
+}
 
 function App() {
   const LOCAL_UI_KEY = "smartExtract.uiState";
   const LOCAL_DRAFT_KEY = "smartExtract.draftSettings";
+  const LOCAL_PROMPT_LIBRARY_KEY = "smartExtract.promptLibrary";
   const MAX_HISTORY = 50;
+  const MAX_CUSTOM_PROMPTS = 20;
 
   const [extractedData, setExtractedData] = useState<ExtractionResult | null>(
     null,
@@ -65,8 +86,14 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [customTemplate, setCustomTemplate] = useState(DEFAULT_TEMPLATE);
   const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
+  const [selectedPromptTemplate, setSelectedPromptTemplate] =
+    useState("summary_5_points");
   const [aiUrl, setAiUrl] = useState(DEFAULT_AI_URL);
   const [templateSaved, setTemplateSaved] = useState(false);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [newPromptName, setNewPromptName] = useState("");
+  const [newPromptText, setNewPromptText] = useState("");
+  const [promptWarning, setPromptWarning] = useState<string | null>(null);
 
   useEffect(() => {
     const uiState = loadLocalState<{
@@ -82,15 +109,24 @@ function App() {
     const draftSettings = loadLocalState<{
       customTemplate: string;
       aiPrompt: string;
+      selectedPromptTemplate: string;
       aiUrl: string;
     }>(LOCAL_DRAFT_KEY, {
       customTemplate: DEFAULT_TEMPLATE,
       aiPrompt: DEFAULT_AI_PROMPT,
+      selectedPromptTemplate: "summary_5_points",
       aiUrl: DEFAULT_AI_URL,
     });
     setCustomTemplate(draftSettings.customTemplate);
     setAiPrompt(draftSettings.aiPrompt);
+    setSelectedPromptTemplate(draftSettings.selectedPromptTemplate);
     setAiUrl(draftSettings.aiUrl);
+    setSavedPrompts(
+      loadLocalState<SavedPrompt[]>(LOCAL_PROMPT_LIBRARY_KEY, []).slice(
+        0,
+        MAX_CUSTOM_PROMPTS,
+      ),
+    );
 
     loadHistoryFromDb()
       .then((entries) => setHistory(entries))
@@ -120,16 +156,32 @@ function App() {
       .catch(console.error);
 
     browser.storage.sync
-      .get(["customTemplate", "aiPrompt", "aiUrl"])
+      .get(["customTemplate", "aiPrompt", "selectedPromptTemplate", "aiUrl"])
       .then((res) => {
         const data = res as {
           customTemplate?: string;
           aiPrompt?: string;
+          selectedPromptTemplate?: string;
           aiUrl?: string;
         };
         if (data.customTemplate) setCustomTemplate(data.customTemplate);
         if (data.aiPrompt) setAiPrompt(data.aiPrompt);
+        if (data.selectedPromptTemplate) {
+          setSelectedPromptTemplate(data.selectedPromptTemplate);
+        }
         if (data.aiUrl) setAiUrl(data.aiUrl);
+      })
+      .catch(console.error);
+
+    browser.storage.sync
+      .get(["customPromptLibrary"])
+      .then((res) => {
+        const data = res as { customPromptLibrary?: SavedPrompt[] };
+        if (Array.isArray(data.customPromptLibrary)) {
+          setSavedPrompts(
+            data.customPromptLibrary.slice(0, MAX_CUSTOM_PROMPTS),
+          );
+        }
       })
       .catch(console.error);
   }, []);
@@ -139,11 +191,31 @@ function App() {
   }, [format, extractedData]);
 
   useEffect(() => {
-    saveLocalState(LOCAL_DRAFT_KEY, { customTemplate, aiPrompt, aiUrl });
-  }, [customTemplate, aiPrompt, aiUrl]);
+    saveLocalState(LOCAL_DRAFT_KEY, {
+      customTemplate,
+      aiPrompt,
+      selectedPromptTemplate,
+      aiUrl,
+    });
+  }, [customTemplate, aiPrompt, selectedPromptTemplate, aiUrl]);
+
+  useEffect(() => {
+    saveLocalState(LOCAL_PROMPT_LIBRARY_KEY, savedPrompts);
+    if (typeof browser !== "undefined" && browser.storage?.sync) {
+      browser.storage.sync
+        .set({ customPromptLibrary: savedPrompts })
+        .catch(console.error);
+    }
+  }, [savedPrompts]);
 
   const saveSettings = async () => {
-    await browser.storage.sync.set({ customTemplate, aiPrompt, aiUrl });
+    await browser.storage.sync.set({
+      customTemplate,
+      aiPrompt,
+      selectedPromptTemplate,
+      aiUrl,
+      customPromptLibrary: savedPrompts,
+    });
     setTemplateSaved(true);
     setTimeout(() => setTemplateSaved(false), 2000);
   };
@@ -151,7 +223,75 @@ function App() {
   const resetSettings = () => {
     setCustomTemplate(DEFAULT_TEMPLATE);
     setAiPrompt(DEFAULT_AI_PROMPT);
+    setSelectedPromptTemplate("summary_5_points");
     setAiUrl(DEFAULT_AI_URL);
+  };
+
+  const applyPromptTemplate = (templateId: string) => {
+    const template = getPromptTemplateById(templateId);
+    setSelectedPromptTemplate(template.id);
+    setAiPrompt(template.prompt);
+  };
+
+  const applySavedPrompt = (saved: SavedPrompt) => {
+    setSelectedPromptTemplate(saved.id);
+    setAiPrompt(saved.prompt);
+    setPromptWarning(null);
+  };
+
+  const handleSavePromptTemplate = () => {
+    const name = newPromptName.trim();
+    const prompt = newPromptText.trim();
+
+    if (name.length < 3) {
+      setPromptWarning("Nama prompt minimal 3 karakter.");
+      return;
+    }
+    if (prompt.length < 20) {
+      setPromptWarning(
+        "Isi prompt minimal 20 karakter agar hasil AI lebih akurat.",
+      );
+      return;
+    }
+
+    setSavedPrompts((prev) => {
+      const existing = prev.find(
+        (item) => item.name.toLowerCase() === name.toLowerCase(),
+      );
+      const nextItem: SavedPrompt = existing
+        ? { ...existing, prompt }
+        : {
+            id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            prompt,
+            createdAt: Date.now(),
+          };
+
+      const withoutExisting = prev.filter((item) => item.id !== nextItem.id);
+      const next = [nextItem, ...withoutExisting].slice(0, MAX_CUSTOM_PROMPTS);
+      return next;
+    });
+
+    setSelectedPromptTemplate("custom");
+    setAiPrompt(prompt);
+    setNewPromptName("");
+    setNewPromptText("");
+    setPromptWarning(null);
+  };
+
+  const handleDeleteSavedPrompt = (id: string) => {
+    setSavedPrompts((prev) => prev.filter((item) => item.id !== id));
+    if (selectedPromptTemplate === id) {
+      setSelectedPromptTemplate("summary_5_points");
+      setAiPrompt(DEFAULT_AI_PROMPT);
+    }
+  };
+
+  const renderPromptIcon = (icon: string) => {
+    if (icon === "book") return <BookOpen className="w-4 h-4" />;
+    if (icon === "layers") return <Layers className="w-4 h-4" />;
+    if (icon === "lightbulb") return <Lightbulb className="w-4 h-4" />;
+    return <List className="w-4 h-4" />;
   };
 
   const stats = useMemo(() => {
@@ -212,13 +352,18 @@ function App() {
 
     const fullText =
       format === "MD" ? extractedData.content : extractedData.textContent;
+    const finalPrompt = buildPromptWithContext(aiPrompt, fullText, {
+      title: extractedData.title,
+      siteName: extractedData.siteName,
+      url: extractedData.url,
+    });
 
     try {
       if (typeof browser !== "undefined" && browser.storage) {
         await browser.storage.local.set({
           pendingChatGPTUpload: {
             text: fullText,
-            prompt: aiPrompt,
+            prompt: finalPrompt,
             title: extractedData.title,
           },
         });
@@ -228,7 +373,6 @@ function App() {
       window.open(baseUrl, "_blank");
     } catch (err) {
       console.error("Failed to save to storage:", err);
-      const finalPrompt = `${aiPrompt}\n\n---\n${fullText}`;
       navigator.clipboard.writeText(finalPrompt);
       alert(
         "Gagal menyiapkan file otomatis. Prompt sudah disalin ke Clipboard. Silakan paste (Ctrl+V) manual di ChatGPT.",
@@ -390,14 +534,132 @@ function App() {
               />
             </div>
             <div>
+              <label className="block text-[10px] font-semibold mb-2 text-slate-600 dark:text-slate-400">
+                Prompt Template
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {PROMPT_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => applyPromptTemplate(template.id)}
+                    className={`text-left p-2 rounded-lg border transition-all ${
+                      selectedPromptTemplate === template.id
+                        ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
+                        : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                      {renderPromptIcon(template.icon)}
+                      <span>{template.label}</span>
+                    </div>
+                    <p className="mt-1 text-[9px] leading-snug opacity-80">
+                      {template.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <div className="flex items-center gap-1.5 font-bold mb-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Peringatan Data
+              </div>
+              Prompt akan dikirim bersama isi teks hasil ekstraksi. Jangan kirim
+              data sensitif.
+            </div>
+            <div>
               <label className="block text-[10px] font-semibold mb-1 text-slate-600 dark:text-slate-400">
-                Default AI Prompt
+                Custom AI Prompt
               </label>
               <textarea
                 className="w-full h-20 p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none resize-none"
                 value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
+                onChange={(e) => {
+                  setAiPrompt(e.target.value);
+                  setSelectedPromptTemplate("custom");
+                }}
               />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                Saved Custom Prompts
+              </label>
+              {savedPrompts.length === 0 && (
+                <p className="text-[10px] text-slate-500">
+                  Belum ada prompt tersimpan.
+                </p>
+              )}
+              {savedPrompts.map((item) => (
+                <div
+                  key={item.id}
+                  className={`rounded-lg border p-2 ${
+                    selectedPromptTemplate === item.id
+                      ? "border-indigo-400 bg-white dark:bg-slate-900"
+                      : "border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/70"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold truncate flex items-center gap-1.5">
+                        <Bookmark className="w-3.5 h-3.5" />
+                        {item.name}
+                      </p>
+                      <p className="text-[9px] text-slate-500 truncate mt-1">
+                        {item.prompt}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => applySavedPrompt(item)}
+                        className="px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-[9px] font-bold"
+                      >
+                        Gunakan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSavedPrompt(item.id)}
+                        className="p-1 rounded-md bg-red-50 text-red-600"
+                        title="Hapus prompt"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3 bg-white/70 dark:bg-slate-900/40">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Tambah Prompt Baru
+              </p>
+              <input
+                type="text"
+                value={newPromptName}
+                onChange={(e) => setNewPromptName(e.target.value)}
+                placeholder="Nama prompt (contoh: Analisis Mendalam)"
+                className="w-full p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+              />
+              <textarea
+                value={newPromptText}
+                onChange={(e) => setNewPromptText(e.target.value)}
+                placeholder="Isi prompt custom Anda..."
+                className="w-full h-20 p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none resize-none"
+              />
+              {promptWarning && (
+                <p className="text-[10px] text-red-600 dark:text-red-400 font-semibold">
+                  {promptWarning}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleSavePromptTemplate}
+                className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
+              >
+                <PlusCircle className="w-4 h-4" />
+                Simpan Prompt
+              </button>
             </div>
           </section>
         </main>
