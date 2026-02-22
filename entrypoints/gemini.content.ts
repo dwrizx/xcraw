@@ -74,6 +74,20 @@ function setPromptValue(element: HTMLElement, value: string): void {
       data: value,
     }),
   );
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function attachTextAsFile(
+  fileInput: HTMLInputElement,
+  text: string,
+  title?: string,
+) {
+  const safeTitle = (title || "SmartExtract").replace(/[^a-z0-9]/gi, "_");
+  const file = new File([text], `${safeTitle}.txt`, { type: "text/plain" });
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
+  fileInput.files = dataTransfer.files;
+  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 export default defineContentScript({
@@ -112,6 +126,7 @@ export default defineContentScript({
       const tryFill = () => {
         attempts++;
         const promptInput = getPromptInput();
+        const fileInput = document.querySelector('input[type="file"]');
         if (!promptInput) {
           if (attempts < maxAttempts) {
             window.setTimeout(tryFill, 400);
@@ -122,7 +137,15 @@ export default defineContentScript({
         }
 
         try {
-          const mergedPrompt = data.prompt || data.text || "";
+          const fileAttached = fileInput instanceof HTMLInputElement;
+          if (data.text && fileAttached) {
+            attachTextAsFile(fileInput, data.text, data.title);
+          }
+
+          const mergedPrompt =
+            data.text && !fileAttached
+              ? `${data.prompt || ""}\n\n---\n${data.text}`.trim()
+              : data.prompt || data.text || "";
           if (mergedPrompt) {
             setPromptValue(promptInput, mergedPrompt);
           }

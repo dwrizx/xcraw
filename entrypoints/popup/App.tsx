@@ -67,6 +67,8 @@ import {
   Bookmark,
   Link2,
   Globe,
+  Cpu,
+  FlaskConical,
 } from "lucide-react";
 import "./App.css";
 
@@ -84,6 +86,18 @@ interface SavedAiUrl {
   provider: AiProvider;
   createdAt: number;
 }
+
+const AI_PROVIDER_OPTIONS: Array<{
+  id: AiProvider;
+  label: string;
+  subtitle: string;
+}> = [
+  { id: "chatgpt", label: "ChatGPT", subtitle: "OpenAI ChatGPT" },
+  { id: "gemini", label: "Gemini", subtitle: "Google Gemini" },
+  { id: "grok", label: "Grok", subtitle: "xAI Grok" },
+  { id: "claude", label: "Claude", subtitle: "Anthropic Claude" },
+  { id: "aistudio", label: "AI Studio", subtitle: "Google AI Studio" },
+];
 
 function App() {
   const LOCAL_UI_KEY = "smartExtract.uiState";
@@ -160,7 +174,11 @@ function App() {
     });
     setCustomTemplate(draftSettings.customTemplate);
     setAiPrompt(draftSettings.aiPrompt);
-    setAiProvider(draftSettings.aiProvider);
+    setAiProvider(
+      draftSettings.aiProvider in AI_PROVIDER_URLS
+        ? draftSettings.aiProvider
+        : DEFAULT_AI_PROVIDER,
+    );
     setEnableFileUpload(draftSettings.enableFileUpload);
     setSelectedPromptTemplate(draftSettings.selectedPromptTemplate);
     setAiUrl(draftSettings.aiUrl);
@@ -175,7 +193,7 @@ function App() {
         .map((item) => ({
           ...item,
           provider:
-            item.provider === "gemini" || item.provider === "chatgpt"
+            item.provider in AI_PROVIDER_URLS
               ? item.provider
               : DEFAULT_AI_PROVIDER,
         }))
@@ -248,7 +266,13 @@ function App() {
         };
         if (data.customTemplate) setCustomTemplate(data.customTemplate);
         if (data.aiPrompt) setAiPrompt(data.aiPrompt);
-        if (data.aiProvider) setAiProvider(data.aiProvider);
+        if (data.aiProvider) {
+          setAiProvider(
+            data.aiProvider in AI_PROVIDER_URLS
+              ? data.aiProvider
+              : DEFAULT_AI_PROVIDER,
+          );
+        }
         if (typeof data.enableFileUpload === "boolean") {
           setEnableFileUpload(data.enableFileUpload);
         }
@@ -281,7 +305,7 @@ function App() {
               .map((item) => ({
                 ...item,
                 provider:
-                  item.provider === "gemini" || item.provider === "chatgpt"
+                  item.provider in AI_PROVIDER_URLS
                     ? item.provider
                     : DEFAULT_AI_PROVIDER,
               }))
@@ -518,6 +542,15 @@ function App() {
     return <List className="w-4 h-4" />;
   };
 
+  const renderProviderIcon = (provider: AiProvider) => {
+    if (provider === "chatgpt")
+      return <MessageSquare className="w-3.5 h-3.5" />;
+    if (provider === "gemini") return <Bot className="w-3.5 h-3.5" />;
+    if (provider === "grok") return <Cpu className="w-3.5 h-3.5" />;
+    if (provider === "claude") return <Sparkles className="w-3.5 h-3.5" />;
+    return <FlaskConical className="w-3.5 h-3.5" />;
+  };
+
   const stats = useMemo(() => {
     if (!extractedData) return { words: 0, time: 0 };
     const wordCount = extractedData.textContent.trim().split(/\s+/).length;
@@ -588,7 +621,8 @@ function App() {
           pendingAIUpload: {
             provider: aiProvider,
             text:
-              aiProvider === "chatgpt" && enableFileUpload
+              (aiProvider === "chatgpt" || aiProvider === "gemini") &&
+              enableFileUpload
                 ? fullText
                 : undefined,
             prompt: finalPrompt,
@@ -767,36 +801,26 @@ function App() {
                 AI Provider
               </label>
               <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => applyProvider("chatgpt")}
-                  className={`p-2 rounded-lg border text-left transition-all ${
-                    aiProvider === "chatgpt"
-                      ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
-                      : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
-                  }`}
-                >
-                  <p className="text-[10px] font-bold flex items-center gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    ChatGPT
-                  </p>
-                  <p className="text-[9px] mt-1 opacity-80">OpenAI ChatGPT</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyProvider("gemini")}
-                  className={`p-2 rounded-lg border text-left transition-all ${
-                    aiProvider === "gemini"
-                      ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
-                      : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
-                  }`}
-                >
-                  <p className="text-[10px] font-bold flex items-center gap-1.5">
-                    <Bot className="w-3.5 h-3.5" />
-                    Gemini
-                  </p>
-                  <p className="text-[9px] mt-1 opacity-80">Google Gemini</p>
-                </button>
+                {AI_PROVIDER_OPTIONS.map((providerOption) => (
+                  <button
+                    key={providerOption.id}
+                    type="button"
+                    onClick={() => applyProvider(providerOption.id)}
+                    className={`p-2 rounded-lg border text-left transition-all ${
+                      aiProvider === providerOption.id
+                        ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
+                        : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    <p className="text-[10px] font-bold flex items-center gap-1.5">
+                      {renderProviderIcon(providerOption.id)}
+                      {providerOption.label}
+                    </p>
+                    <p className="text-[9px] mt-1 opacity-80">
+                      {providerOption.subtitle}
+                    </p>
+                  </button>
+                ))}
               </div>
             </div>
             <div>
@@ -824,7 +848,7 @@ function App() {
                   </p>
                   <p className="text-[9px] text-slate-500 mt-1">
                     Jika aktif, hasil extract dikirim sebagai lampiran file
-                    (khusus ChatGPT).
+                    (ChatGPT & Gemini).
                   </p>
                 </div>
                 <button

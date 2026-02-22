@@ -21,7 +21,7 @@ export interface UserSettings {
   enableFileUpload: boolean;
 }
 
-export type AiProvider = "chatgpt" | "gemini";
+export type AiProvider = "chatgpt" | "gemini" | "grok" | "claude" | "aistudio";
 
 export interface PendingAIUpload {
   provider: AiProvider;
@@ -66,4 +66,7 @@ export const DEFAULT_AI_URL = "https://chatgpt.com/";
 export const AI_PROVIDER_URLS: Record<AiProvider, string> = {
   chatgpt: "https://chatgpt.com/",
   gemini: "https://gemini.google.com/app?hl=id",
+  grok: "https://grok.com/",
+  claude: "https://claude.ai/new",
+  aistudio: "https://aistudio.google.com/",
 };
