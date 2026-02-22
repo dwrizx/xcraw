@@ -4,45 +4,29 @@ import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 import DOMPurify from "dompurify";
 import type { ExtractionResult } from "./types";
+import { DEFAULT_TEMPLATE } from "./types";
 
 /**
- * Enhanced formatter for consistent and professional headers.
- * Only used for Full Page extractions.
+ * Replaces variables in the template string with actual data.
  */
-function createHeader(
-  article: { title: string; byline?: string; siteName?: string },
-  url: string,
-  isMarkdown: boolean,
+function applyTemplate(
+  template: string,
+  data: {
+    title: string;
+    author: string;
+    url: string;
+    date: string;
+    siteName: string;
+    content: string;
+  },
 ): string {
-  const separator = "=".repeat(80);
-  const dateStr = new Date().toLocaleString();
-  const author = article.byline || "Unknown Author";
-  const site = article.siteName || new URL(url).hostname;
-
-  const metadata = [
-    separator,
-    `TITLE   : ${article.title}`,
-    `AUTHOR  : ${author}`,
-    `SITE    : ${site}`,
-    `SOURCE  : ${url}`,
-    `DATE    : ${dateStr}`,
-    separator,
-    "",
-  ];
-
-  if (isMarkdown) {
-    metadata.push(`# ${article.title}`, "", `Source: [${url}](${url})`, "");
-  } else {
-    metadata.push(
-      article.title.toUpperCase(),
-      "=".repeat(article.title.length),
-      "",
-      `Source: ${url}`,
-      "",
-    );
-  }
-
-  return metadata.join("\n");
+  return template
+    .replace(/{{title}}/g, data.title)
+    .replace(/{{author}}/g, data.author)
+    .replace(/{{url}}/g, data.url)
+    .replace(/{{date}}/g, data.date)
+    .replace(/{{site}}/g, data.siteName)
+    .replace(/{{content}}/g, data.content);
 }
 
 /**
@@ -52,6 +36,7 @@ export async function extractPageContent(
   doc: Document | HTMLElement,
   url: string,
   isSelection: boolean = false,
+  customTemplate?: string,
 ): Promise<ExtractionResult | null> {
   let title = "";
   let textContent = "";
@@ -61,14 +46,11 @@ export async function extractPageContent(
   let excerpt = "";
 
   if (isSelection && doc instanceof HTMLElement) {
-    // SELECTION MODE: No headers, just the content
     title = `Selection from ${siteName}`;
     cleanHtml = DOMPurify.sanitize(doc.innerHTML);
     textContent = doc.innerText;
   } else {
-    // FULL PAGE MODE: Use Readability and include headers
     const clone = (doc as Document).cloneNode(true) as Document;
-
     const unwanted = clone.querySelectorAll(
       "nav, footer, .ads, .social-share, .comments, script, style",
     );
@@ -96,11 +78,10 @@ export async function extractPageContent(
 
   try {
     turndownService.use(gfm);
-  } catch (_e) {
+  } catch {
     // Fallback
   }
 
-  // Absolute URLs for links and images
   turndownService.addRule("absolute-links", {
     filter: (node) => {
       const tag = node.nodeName.toLowerCase();
@@ -135,19 +116,34 @@ export async function extractPageContent(
     },
   });
 
-  const markdownBody = turndownService.turndown(cleanHtml);
-  const articleInfo = { title, byline, siteName };
+  const markdownBody = turndownService
+    .turndown(cleanHtml)
+    .replace(/\n{3,}/g, "\n\n");
+  const dateStr = new Date().toLocaleString();
+  const author = byline || "Unknown Author";
 
-  // Logic: Only add header if it's NOT a selection
+  const templateData = {
+    title,
+    author,
+    url,
+    date: dateStr,
+    siteName,
+    content: markdownBody,
+  };
+
+  // Logic:
+  // 1. If Selection: Just content (cleanest).
+  // 2. If Full Page: Use custom template OR default template.
   const finalMd = isSelection
-    ? markdownBody.replace(/\n{3,}/g, "\n\n").trim()
-    : createHeader(articleInfo, url, true) +
-      markdownBody.replace(/\n{3,}/g, "\n\n");
+    ? markdownBody
+    : applyTemplate(customTemplate || DEFAULT_TEMPLATE, templateData);
 
   const finalTxt = isSelection
     ? textContent.replace(/\n{3,}/g, "\n\n").trim()
-    : createHeader(articleInfo, url, false) +
-      textContent.replace(/\n{3,}/g, "\n\n");
+    : applyTemplate(customTemplate || DEFAULT_TEMPLATE, {
+        ...templateData,
+        content: textContent,
+      });
 
   return {
     title,

@@ -7,7 +7,6 @@ export default defineContentScript({
     const HIGHLIGHT_CLASS = "smart-extract-pro-highlight";
     const TOAST_ID = "smart-extract-toast";
 
-    // 1. Tambahkan CSS Pro untuk Inspector & Toast
     const style = document.createElement("style");
     style.textContent = `
       .${HIGHLIGHT_CLASS} {
@@ -42,7 +41,6 @@ export default defineContentScript({
     `;
     document.head.appendChild(style);
 
-    // Fungsi menampilkan Toast
     const showToast = (message: string) => {
       let toast = document.getElementById(TOAST_ID);
       if (!toast) {
@@ -55,13 +53,19 @@ export default defineContentScript({
       setTimeout(() => toast?.classList.remove("show"), 3000);
     };
 
-    // Listeners Dasar
-    onMessage("extractContent", async () => {
+    // Full Page Extraction
+    onMessage("extractContent", async (template) => {
       if (ctx.isInvalid) return null;
-      return await extractPageContent(document, window.location.href);
+      return await extractPageContent(
+        document,
+        window.location.href,
+        false,
+        template?.data,
+      );
     });
 
-    onMessage("extractSelection", async () => {
+    // Selection Extraction
+    onMessage("extractSelection", async (template) => {
       if (ctx.isInvalid) return null;
       const selection = window.getSelection();
       if (
@@ -73,11 +77,16 @@ export default defineContentScript({
       }
       const container = document.createElement("div");
       container.appendChild(selection.getRangeAt(0).cloneContents());
-      return await extractPageContent(container, window.location.href, true);
+      return await extractPageContent(
+        container,
+        window.location.href,
+        true,
+        template?.data,
+      );
     });
 
-    // --- Visual Inspector Pro Mode ---
-    onMessage("startInspector", () => {
+    // Visual Inspector
+    onMessage("startInspector", (template) => {
       if (ctx.isInvalid) return;
 
       let lastElement: HTMLElement | null = null;
@@ -103,15 +112,11 @@ export default defineContentScript({
             target,
             window.location.href,
             true,
+            template?.data,
           );
           if (result) {
-            // AUTO-COPY ke Clipboard
             await navigator.clipboard.writeText(result.content);
-
-            // Simpan ke storage untuk ditampilkan di popup nanti
             await browser.storage.local.set({ lastVisualExtraction: result });
-
-            // Tampilkan Notifikasi di Halaman
             showToast(`Copied: ${result.title.substring(0, 30)}...`);
           }
         } catch (err) {

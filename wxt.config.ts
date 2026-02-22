@@ -9,6 +9,9 @@ export default defineConfig({
   }),
   manifest: {
     name: "SmartExtract",
+    description:
+      "Extract web content into clean Markdown or Plain Text instantly.",
+    version: "2.4.1",
     permissions: ["activeTab", "scripting", "storage"],
     action: {
       default_popup: "entrypoints/popup/index.html",
@@ -18,7 +21,6 @@ export default defineConfig({
       "16": "icon.svg",
       "32": "icon.svg",
       "48": "icon.svg",
-      "96": "icon.svg",
       "128": "icon.svg",
     },
   },

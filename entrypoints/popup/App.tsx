@@ -2,6 +2,11 @@ import { useState, useMemo, useEffect } from "react";
 import { sendMessage } from "@/lib/messaging";
 import type { ExtractionResult } from "@/lib/types";
 import {
+  DEFAULT_TEMPLATE,
+  DEFAULT_AI_PROMPT,
+  DEFAULT_AI_URL,
+} from "@/lib/types";
+import {
   FileText,
   Copy,
   Check,
@@ -18,6 +23,12 @@ import {
   Trash2,
   AlertCircle,
   Sparkles,
+  Settings,
+  ChevronLeft,
+  RotateCcw,
+  Save,
+  BrainCircuit,
+  MessageSquare,
 } from "lucide-react";
 import "./App.css";
 
@@ -31,13 +42,16 @@ function App() {
   const [format, setFormat] = useState<"MD" | "TXT">("MD");
   const [wasAutoCopied, setWasAutoCopied] = useState(false);
 
-  // Load last visual extraction on popup open
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [customTemplate, setCustomTemplate] = useState(DEFAULT_TEMPLATE);
+  const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
+  const [aiUrl, setAiUrl] = useState(DEFAULT_AI_URL);
+  const [templateSaved, setTemplateSaved] = useState(false);
+
   useEffect(() => {
-    if (
-      typeof browser !== "undefined" &&
-      browser.storage &&
-      browser.storage.local
-    ) {
+    if (typeof browser !== "undefined" && browser.storage) {
+      // Load last visual extraction
       browser.storage.local
         .get("lastVisualExtraction")
         .then((res) => {
@@ -45,14 +59,40 @@ function App() {
           if (data.lastVisualExtraction) {
             setExtractedData(data.lastVisualExtraction);
             setWasAutoCopied(true);
-            // Reset status copied setelah 3 detik
             setTimeout(() => setWasAutoCopied(false), 3000);
             browser.storage.local.remove("lastVisualExtraction");
           }
         })
-        .catch((err) => console.error("Storage Error:", err));
+        .catch(console.error);
+
+      // Load settings
+      browser.storage.sync
+        .get(["customTemplate", "aiPrompt", "aiUrl"])
+        .then((res) => {
+          const data = res as {
+            customTemplate?: string;
+            aiPrompt?: string;
+            aiUrl?: string;
+          };
+          if (data.customTemplate) setCustomTemplate(data.customTemplate);
+          if (data.aiPrompt) setAiPrompt(data.aiPrompt);
+          if (data.aiUrl) setAiUrl(data.aiUrl);
+        })
+        .catch(console.error);
     }
   }, []);
+
+  const saveSettings = async () => {
+    await browser.storage.sync.set({ customTemplate, aiPrompt, aiUrl });
+    setTemplateSaved(true);
+    setTimeout(() => setTemplateSaved(false), 2000);
+  };
+
+  const resetSettings = () => {
+    setCustomTemplate(DEFAULT_TEMPLATE);
+    setAiPrompt(DEFAULT_AI_PROMPT);
+    setAiUrl(DEFAULT_AI_URL);
+  };
 
   const stats = useMemo(() => {
     if (!extractedData) return { words: 0, time: 0 };
@@ -63,12 +103,42 @@ function App() {
     };
   }, [extractedData]);
 
+  const handleAskAI = async () => {
+    if (!extractedData) return;
+
+    const fullText =
+      format === "MD" ? extractedData.content : extractedData.textContent;
+
+    try {
+      if (typeof browser !== "undefined" && browser.storage) {
+        await browser.storage.local.set({
+          pendingChatGPTUpload: {
+            text: fullText,
+            prompt: aiPrompt,
+            title: extractedData.title,
+          },
+        });
+      }
+
+      const baseUrl = aiUrl.split("?")[0];
+      window.open(baseUrl, "_blank");
+    } catch (err) {
+      console.error("Failed to save to storage:", err);
+      const finalPrompt = `${aiPrompt}\n\n---\n${fullText}`;
+      navigator.clipboard.writeText(finalPrompt);
+      alert(
+        "Gagal menyiapkan file otomatis. Prompt sudah disalin ke Clipboard. Silakan paste (Ctrl+V) manual di ChatGPT.",
+      );
+      window.open(aiUrl.split("?")[0], "_blank");
+    }
+  };
+
   const safeSendMessage = async (
     tabId: number,
     action: "extractContent" | "extractSelection" | "startInspector",
   ) => {
     try {
-      return await sendMessage(action, undefined, { tabId });
+      return await sendMessage(action, customTemplate, { tabId });
     } catch (err: any) {
       const msg = err.message || "";
       if (
@@ -81,7 +151,7 @@ function App() {
           files: ["content-scripts/content.js"],
         });
         await new Promise((r) => setTimeout(r, 600));
-        return await sendMessage(action, undefined, { tabId });
+        return await sendMessage(action, customTemplate, { tabId });
       }
       throw err;
     }
@@ -99,7 +169,6 @@ function App() {
         currentWindow: true,
       });
       if (!tab?.id || !tab.url) throw new Error("No active tab found.");
-
       const result = await safeSendMessage(tab.id, "extractContent");
       if (result) setExtractedData(result);
       else throw new Error("No readable content found.");
@@ -120,15 +189,11 @@ function App() {
         currentWindow: true,
       });
       if (!tab?.id) throw new Error("No active tab found.");
-
       const result = await safeSendMessage(tab.id, "extractSelection");
       if (result) setExtractedData(result);
     } catch (err: any) {
-      if (err.message?.includes("selected")) {
-        setError("Please highlight/select some text first!");
-      } else {
-        setError(err.message || "Selection extraction failed.");
-      }
+      if (err.message?.includes("selected")) setError("Highlight text first!");
+      else setError(err.message || "Selection failed.");
     } finally {
       setLoading(false);
     }
@@ -141,11 +206,10 @@ function App() {
         currentWindow: true,
       });
       if (!tab?.id) throw new Error("No active tab found.");
-
       await safeSendMessage(tab.id, "startInspector");
-      window.close(); // Popup close to allow picking
+      window.close();
     } catch (err: any) {
-      setError(err.message || "Could not start visual picker.");
+      setError(err.message || "Could not start inspector.");
     }
   };
 
@@ -174,6 +238,88 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  if (showSettings) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 min-w-[420px]">
+        <header className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSettings(false)}
+              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <h1 className="font-bold text-lg tracking-tight">Settings & AI</h1>
+          </div>
+        </header>
+        <main className="flex-1 p-5 overflow-y-auto space-y-6">
+          {/* Header Template */}
+          <section>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+              Markdown Template
+            </label>
+            <textarea
+              className="w-full h-40 p-3 text-[10px] font-mono bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              value={customTemplate}
+              onChange={(e) => setCustomTemplate(e.target.value)}
+            />
+          </section>
+
+          {/* AI Settings */}
+          <section className="bg-indigo-50/50 dark:bg-indigo-900/10 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 space-y-4">
+            <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+              <BrainCircuit className="w-4 h-4" />
+              <h2 className="text-xs font-bold uppercase tracking-wider">
+                AI Configuration
+              </h2>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold mb-1 text-slate-600 dark:text-slate-400">
+                AI Tool URL
+              </label>
+              <input
+                type="text"
+                className="w-full p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+                value={aiUrl}
+                onChange={(e) => setAiUrl(e.target.value)}
+                placeholder="https://chatgpt.com/"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold mb-1 text-slate-600 dark:text-slate-400">
+                Default AI Prompt
+              </label>
+              <textarea
+                className="w-full h-20 p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none resize-none"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+              />
+            </div>
+          </section>
+        </main>
+        <footer className="p-5 border-t border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md flex justify-between gap-3">
+          <button
+            onClick={resetSettings}
+            className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold transition-all flex items-center gap-2 active:scale-95"
+          >
+            <RotateCcw className="w-4 h-4" /> Reset
+          </button>
+          <button
+            onClick={saveSettings}
+            className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 active:scale-95"
+          >
+            {templateSaved ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            {templateSaved ? "Settings Saved!" : "Save Changes"}
+          </button>
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 min-w-[420px]">
       {/* Header */}
@@ -185,22 +331,30 @@ function App() {
           <h1 className="font-bold text-lg tracking-tight">
             SmartExtract{" "}
             <span className="text-[10px] font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-600 px-1.5 py-0.5 rounded ml-1">
-              v2.4
+              v2.5
             </span>
           </h1>
         </div>
-        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+            <button
+              onClick={() => setFormat("MD")}
+              className={`px-3 py-1 text-[11px] font-bold rounded flex items-center gap-1 transition-all ${format === "MD" ? "bg-white dark:bg-slate-700 shadow-sm text-blue-600" : "text-slate-500 hover:text-slate-800"}`}
+            >
+              <FileCode className="w-3.5 h-3.5" /> MD
+            </button>
+            <button
+              onClick={() => setFormat("TXT")}
+              className={`px-3 py-1 text-[11px] font-bold rounded flex items-center gap-1 transition-all ${format === "TXT" ? "bg-white dark:bg-slate-700 shadow-sm text-blue-600" : "text-slate-500 hover:text-slate-800"}`}
+            >
+              <Type className="w-3.5 h-3.5" /> TXT
+            </button>
+          </div>
           <button
-            onClick={() => setFormat("MD")}
-            className={`px-3 py-1 text-[11px] font-bold rounded flex items-center gap-1 transition-all ${format === "MD" ? "bg-white dark:bg-slate-700 shadow-sm text-blue-600" : "text-slate-500 hover:text-slate-800"}`}
+            onClick={() => setShowSettings(true)}
+            className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
-            <FileCode className="w-3.5 h-3.5" /> MD
-          </button>
-          <button
-            onClick={() => setFormat("TXT")}
-            className={`px-3 py-1 text-[11px] font-bold rounded flex items-center gap-1 transition-all ${format === "TXT" ? "bg-white dark:bg-slate-700 shadow-sm text-blue-600" : "text-slate-500 hover:text-slate-800"}`}
-          >
-            <Type className="w-3.5 h-3.5" /> TXT
+            <Settings className="w-5 h-5" />
           </button>
         </div>
       </header>
@@ -214,12 +368,11 @@ function App() {
               <FileText className="w-10 h-10 text-blue-600 dark:text-blue-400 relative z-10" />
             </div>
             <div className="max-w-[240px]">
-              <p className="font-bold text-slate-800 dark:text-slate-200 text-lg">
+              <p className="font-bold text-slate-800 dark:text-slate-200 text-lg tracking-tight">
                 Instant Extraction
               </p>
               <p className="text-sm text-slate-500 mt-2">
-                Pick an element, select text, or extract the whole page in one
-                click.
+                Professional tool to extract and process web content with AI.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 w-full max-w-[320px]">
@@ -227,13 +380,13 @@ function App() {
                 onClick={handleFullExtract}
                 className="col-span-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98] flex items-center justify-center gap-2"
               >
-                <Zap className="w-4 h-4 fill-white" /> Extract Full Page
+                <Zap className="w-4 h-4 fill-white" /> Full Page
               </button>
               <button
                 onClick={handleStartInspector}
                 className="px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 rounded-2xl text-xs font-bold transition-all flex flex-col items-center gap-2 shadow-sm active:scale-[0.98]"
               >
-                <MousePointer2 className="w-5 h-5" /> Visual Picker
+                <MousePointer2 className="w-5 h-5" /> Picker
               </button>
               <button
                 onClick={handleSelectionExtract}
@@ -247,27 +400,22 @@ function App() {
 
         {loading && (
           <div className="flex flex-col items-center justify-center h-[340px] space-y-5">
-            <div className="relative">
-              <RefreshCw className="w-12 h-12 text-blue-600 animate-spin" />
-              <div className="absolute inset-0 blur-xl bg-blue-400 opacity-20 animate-pulse"></div>
-            </div>
+            <RefreshCw className="w-12 h-12 text-blue-600 animate-spin" />
             <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
-              Processing Content...
+              Processing...
             </p>
           </div>
         )}
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-3xl p-8 text-center animate-in zoom-in duration-500">
-            <div className="flex justify-center mb-4">
-              <AlertCircle className="w-10 h-10 text-red-500" />
-            </div>
+            <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-4" />
             <p className="text-red-600 dark:text-red-400 text-sm font-bold leading-relaxed mb-6">
               {error}
             </p>
             <button
               onClick={() => setError(null)}
-              className="w-full py-3 bg-white dark:bg-slate-800 border border-red-200 dark:border-red-900/40 text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-widest rounded-xl shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
+              className="w-full py-3 bg-white dark:bg-slate-800 border border-red-200 dark:border-red-900/40 text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-widest rounded-xl"
             >
               Go Back
             </button>
@@ -277,8 +425,13 @@ function App() {
         {extractedData && !loading && (
           <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-2">
             {/* Metadata Card */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xl shadow-slate-200/50 dark:shadow-none border-l-4 border-l-blue-600 relative overflow-hidden group">
-              <div className="absolute top-0 right-0 p-3">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xl border-l-4 border-l-blue-600 relative group">
+              <div className="absolute top-0 right-0 p-3 flex gap-2">
+                {wasAutoCopied && (
+                  <div className="flex items-center gap-1 px-2 py-0.5 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-[9px] font-bold rounded-full animate-in zoom-in">
+                    <Sparkles className="w-2.5 h-2.5" /> Auto-copied
+                  </div>
+                )}
                 <button
                   onClick={() => setExtractedData(null)}
                   className="text-slate-300 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
@@ -286,28 +439,20 @@ function App() {
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-              {wasAutoCopied && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-[10px] font-bold rounded-full mb-3 animate-in fade-in zoom-in">
-                  <Sparkles className="w-3 h-3 fill-green-600" /> Auto-copied to
-                  Clipboard!
+              <h2 className="font-bold text-slate-800 dark:text-white leading-tight pr-12 text-sm tracking-tight mb-4">
+                {extractedData.title}
+              </h2>
+              <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 rounded-full">
+                  <Clock className="w-3 h-3 text-blue-500" />
+                  {stats.time} Min
                 </div>
-              )}
-              <div className="flex items-start justify-between mb-4">
-                <h2 className="font-bold text-slate-800 dark:text-white leading-tight pr-6 text-base tracking-tight">
-                  {extractedData.title}
-                </h2>
-              </div>
-              <div className="flex flex-wrap gap-4 text-[11px] font-bold text-slate-500 tracking-tight">
-                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-3 py-1 rounded-full">
-                  <Clock className="w-3.5 h-3.5 text-blue-500" />
-                  {stats.time} min read
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 rounded-full">
+                  <Hash className="w-3 h-3 text-indigo-500" />
+                  {stats.words} Words
                 </div>
-                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-3 py-1 rounded-full">
-                  <Hash className="w-3.5 h-3.5 text-indigo-500" />
-                  {stats.words} words
-                </div>
-                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-3 py-1 rounded-full">
-                  <ExternalLink className="w-3.5 h-3.5 text-emerald-500" />
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 rounded-full">
+                  <ExternalLink className="w-3 h-3 text-emerald-500" />
                   {extractedData.siteName}
                 </div>
               </div>
@@ -326,8 +471,15 @@ function App() {
               />
               <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
                 <button
+                  onClick={handleAskAI}
+                  className="p-3 bg-indigo-600 text-white shadow-xl rounded-2xl hover:bg-indigo-700 transition-all active:scale-90"
+                  title="Ask AI Summary"
+                >
+                  <BrainCircuit className="w-5 h-5 fill-white/20" />
+                </button>
+                <button
                   onClick={handleCopy}
-                  className="p-3 bg-white/95 dark:bg-slate-800/95 shadow-xl rounded-2xl hover:bg-white dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 active:scale-90"
+                  className="p-3 bg-white/95 dark:bg-slate-800/95 shadow-xl rounded-2xl hover:bg-white transition-all border border-slate-200 dark:border-slate-700 active:scale-90"
                   title="Copy"
                 >
                   {copied ? (
@@ -338,7 +490,7 @@ function App() {
                 </button>
                 <button
                   onClick={handleDownload}
-                  className="p-3 bg-white/95 dark:bg-slate-800/95 shadow-xl rounded-2xl hover:bg-white dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 active:scale-90"
+                  className="p-3 bg-white/95 dark:bg-slate-800/95 shadow-xl rounded-2xl hover:bg-white transition-all border border-slate-200 dark:border-slate-700 active:scale-90"
                   title="Download"
                 >
                   <Download className="w-5 h-5 text-blue-500" />
@@ -350,19 +502,20 @@ function App() {
       </main>
 
       {/* Footer Actions */}
-      {extractedData && (
+      {!showSettings && extractedData && (
         <footer className="p-5 border-t border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md flex gap-3 animate-in slide-in-from-bottom-6 duration-700">
           <button
             onClick={handleFullExtract}
-            className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98]"
+            className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-600/20 active:scale-95"
           >
-            Extract Whole Page
+            <Zap className="w-4 h-4 fill-white" /> Whole Page
           </button>
           <button
-            onClick={handleStartInspector}
-            className="flex-1 flex items-center justify-center gap-2 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-2xl text-sm font-bold transition-all active:scale-[0.98]"
+            onClick={handleAskAI}
+            className="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold shadow-lg shadow-indigo-600/20 active:scale-95"
           >
-            <MousePointer2 className="w-4 h-4" /> Change Picker
+            <MessageSquare className="w-4 h-4 fill-white/20" /> Summarize with
+            AI
           </button>
         </footer>
       )}
