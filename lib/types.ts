@@ -26,6 +26,21 @@ export interface PendingChatGPTUpload {
   prompt?: string;
 }
 
+export type ExtractionSource = "full" | "selection" | "picker";
+export type OutputFormat = "MD" | "TXT";
+
+export interface HistoryEntry {
+  id: string;
+  createdAt: number;
+  title: string;
+  url: string;
+  siteName: string;
+  source: ExtractionSource;
+  format: OutputFormat;
+  content: string;
+  textContent: string;
+}
+
 export const DEFAULT_TEMPLATE = `================================================================================
 TITLE   : {{title}}
 AUTHOR  : {{author}}

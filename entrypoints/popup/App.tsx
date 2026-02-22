@@ -1,11 +1,23 @@
 import { useState, useMemo, useEffect } from "react";
 import { sendMessage } from "@/lib/messaging";
-import type { ExtractionResult } from "@/lib/types";
+import type {
+  ExtractionResult,
+  ExtractionSource,
+  HistoryEntry,
+  OutputFormat,
+} from "@/lib/types";
 import {
   DEFAULT_TEMPLATE,
   DEFAULT_AI_PROMPT,
   DEFAULT_AI_URL,
 } from "@/lib/types";
+import { loadLocalState, saveLocalState } from "@/lib/local-state";
+import { loadHistoryFromDb, saveHistoryToDb } from "@/lib/history-db";
+import {
+  createHistoryEntry,
+  insertHistoryEntry,
+  removeHistoryEntry,
+} from "@/lib/history-utils";
 import {
   FileText,
   Copy,
@@ -29,18 +41,25 @@ import {
   Save,
   BrainCircuit,
   MessageSquare,
+  History,
 } from "lucide-react";
 import "./App.css";
 
 function App() {
+  const LOCAL_UI_KEY = "smartExtract.uiState";
+  const LOCAL_DRAFT_KEY = "smartExtract.draftSettings";
+  const MAX_HISTORY = 50;
+
   const [extractedData, setExtractedData] = useState<ExtractionResult | null>(
     null,
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [format, setFormat] = useState<"MD" | "TXT">("MD");
+  const [format, setFormat] = useState<OutputFormat>("MD");
   const [wasAutoCopied, setWasAutoCopied] = useState(false);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
@@ -50,37 +69,81 @@ function App() {
   const [templateSaved, setTemplateSaved] = useState(false);
 
   useEffect(() => {
-    if (typeof browser !== "undefined" && browser.storage) {
-      // Load last visual extraction
-      browser.storage.local
-        .get("lastVisualExtraction")
-        .then((res) => {
-          const data = res as { lastVisualExtraction?: ExtractionResult };
-          if (data.lastVisualExtraction) {
-            setExtractedData(data.lastVisualExtraction);
-            setWasAutoCopied(true);
-            setTimeout(() => setWasAutoCopied(false), 3000);
-            browser.storage.local.remove("lastVisualExtraction");
-          }
-        })
-        .catch(console.error);
+    const uiState = loadLocalState<{
+      format: OutputFormat;
+      extractedData: ExtractionResult | null;
+    }>(LOCAL_UI_KEY, {
+      format: "MD",
+      extractedData: null,
+    });
+    setFormat(uiState.format);
+    setExtractedData(uiState.extractedData);
 
-      // Load settings
-      browser.storage.sync
-        .get(["customTemplate", "aiPrompt", "aiUrl"])
-        .then((res) => {
-          const data = res as {
-            customTemplate?: string;
-            aiPrompt?: string;
-            aiUrl?: string;
-          };
-          if (data.customTemplate) setCustomTemplate(data.customTemplate);
-          if (data.aiPrompt) setAiPrompt(data.aiPrompt);
-          if (data.aiUrl) setAiUrl(data.aiUrl);
-        })
-        .catch(console.error);
-    }
+    const draftSettings = loadLocalState<{
+      customTemplate: string;
+      aiPrompt: string;
+      aiUrl: string;
+    }>(LOCAL_DRAFT_KEY, {
+      customTemplate: DEFAULT_TEMPLATE,
+      aiPrompt: DEFAULT_AI_PROMPT,
+      aiUrl: DEFAULT_AI_URL,
+    });
+    setCustomTemplate(draftSettings.customTemplate);
+    setAiPrompt(draftSettings.aiPrompt);
+    setAiUrl(draftSettings.aiUrl);
+
+    loadHistoryFromDb()
+      .then((entries) => setHistory(entries))
+      .catch(console.error);
+
+    if (typeof browser === "undefined" || !browser.storage) return;
+
+    browser.storage.local
+      .get("lastVisualExtraction")
+      .then(async (res) => {
+        const data = res as { lastVisualExtraction?: ExtractionResult };
+        if (!data.lastVisualExtraction) return;
+
+        setExtractedData(data.lastVisualExtraction);
+        setWasAutoCopied(true);
+        setTimeout(() => setWasAutoCopied(false), 3000);
+        await browser.storage.local.remove("lastVisualExtraction");
+
+        setHistory((prev) => {
+          const entry = createHistoryEntry(
+            data.lastVisualExtraction,
+            "picker",
+            "MD",
+          );
+          const next = insertHistoryEntry(prev, entry, MAX_HISTORY);
+          saveHistoryToDb(next).catch(console.error);
+          return next;
+        });
+      })
+      .catch(console.error);
+
+    browser.storage.sync
+      .get(["customTemplate", "aiPrompt", "aiUrl"])
+      .then((res) => {
+        const data = res as {
+          customTemplate?: string;
+          aiPrompt?: string;
+          aiUrl?: string;
+        };
+        if (data.customTemplate) setCustomTemplate(data.customTemplate);
+        if (data.aiPrompt) setAiPrompt(data.aiPrompt);
+        if (data.aiUrl) setAiUrl(data.aiUrl);
+      })
+      .catch(console.error);
   }, []);
+
+  useEffect(() => {
+    saveLocalState(LOCAL_UI_KEY, { format, extractedData });
+  }, [format, extractedData]);
+
+  useEffect(() => {
+    saveLocalState(LOCAL_DRAFT_KEY, { customTemplate, aiPrompt, aiUrl });
+  }, [customTemplate, aiPrompt, aiUrl]);
 
   const saveSettings = async () => {
     await browser.storage.sync.set({ customTemplate, aiPrompt, aiUrl });
@@ -102,6 +165,50 @@ function App() {
       time: Math.max(1, Math.ceil(wordCount / 200)),
     };
   }, [extractedData]);
+
+  const persistExtraction = (
+    result: ExtractionResult,
+    source: ExtractionSource,
+    usedFormat: OutputFormat,
+  ) => {
+    setExtractedData(result);
+    setHistory((prev) => {
+      const entry = createHistoryEntry(result, source, usedFormat);
+      const next = insertHistoryEntry(prev, entry, MAX_HISTORY);
+      saveHistoryToDb(next).catch(console.error);
+      return next;
+    });
+  };
+
+  const handleRestoreHistory = (entry: HistoryEntry) => {
+    setExtractedData({
+      title: entry.title,
+      byline: "",
+      dir: "ltr",
+      content: entry.content,
+      textContent: entry.textContent,
+      length: entry.textContent.length,
+      excerpt: "",
+      siteName: entry.siteName,
+      url: entry.url,
+    });
+    setFormat(entry.format);
+    setShowHistory(false);
+    setError(null);
+  };
+
+  const handleDeleteHistory = (id: string) => {
+    setHistory((prev) => {
+      const next = removeHistoryEntry(prev, id);
+      saveHistoryToDb(next).catch(console.error);
+      return next;
+    });
+  };
+
+  const handleClearHistory = () => {
+    setHistory([]);
+    saveHistoryToDb([]).catch(console.error);
+  };
 
   const handleAskAI = async () => {
     if (!extractedData) return;
@@ -170,7 +277,7 @@ function App() {
       });
       if (!tab?.id || !tab.url) throw new Error("No active tab found.");
       const result = await safeSendMessage(tab.id, "extractContent");
-      if (result) setExtractedData(result);
+      if (result) persistExtraction(result, "full", format);
       else throw new Error("No readable content found.");
     } catch (err: any) {
       setError(err.message || "Extraction failed.");
@@ -190,7 +297,7 @@ function App() {
       });
       if (!tab?.id) throw new Error("No active tab found.");
       const result = await safeSendMessage(tab.id, "extractSelection");
-      if (result) setExtractedData(result);
+      if (result) persistExtraction(result, "selection", format);
     } catch (err: any) {
       if (err.message?.includes("selected")) setError("Highlight text first!");
       else setError(err.message || "Selection failed.");
@@ -351,6 +458,17 @@ function App() {
             </button>
           </div>
           <button
+            onClick={() => setShowHistory((prev) => !prev)}
+            className={`p-2 rounded-lg transition-colors ${
+              showHistory
+                ? "text-blue-600 bg-blue-50 dark:bg-blue-900/30"
+                : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            }`}
+            title="History"
+          >
+            <History className="w-5 h-5" />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
             className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
@@ -422,7 +540,68 @@ function App() {
           </div>
         )}
 
-        {extractedData && !loading && (
+        {showHistory && !loading && (
+          <section className="space-y-3 animate-in fade-in duration-500">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Extraction History
+              </h2>
+              <button
+                onClick={handleClearHistory}
+                disabled={history.length === 0}
+                className="text-[10px] font-bold text-red-500 disabled:text-slate-300 uppercase tracking-wider"
+              >
+                Clear All
+              </button>
+            </div>
+
+            {history.length === 0 && (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-xs text-slate-500">
+                Belum ada history ekstraksi.
+              </div>
+            )}
+
+            {history.map((item) => (
+              <article
+                key={item.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                      {item.title}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-1 truncate">
+                      {item.siteName || item.url}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {new Date(item.createdAt).toLocaleString()} •{" "}
+                      {item.source} • {item.format}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => handleRestoreHistory(item)}
+                      className="px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-[10px] font-bold"
+                    >
+                      Pakai Lagi
+                    </button>
+                    <button
+                      onClick={() => handleDeleteHistory(item.id)}
+                      className="p-1.5 rounded-md bg-red-50 text-red-600"
+                      title="Hapus item"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {extractedData && !loading && !showHistory && (
           <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-2">
             {/* Metadata Card */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xl border-l-4 border-l-blue-600 relative group">
@@ -502,7 +681,7 @@ function App() {
       </main>
 
       {/* Footer Actions */}
-      {!showSettings && extractedData && (
+      {!showSettings && !showHistory && extractedData && (
         <footer className="p-5 border-t border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md flex gap-3 animate-in slide-in-from-bottom-6 duration-700">
           <button
             onClick={handleFullExtract}
