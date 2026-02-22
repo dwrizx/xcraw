@@ -102,19 +102,16 @@ function App() {
       .get("lastVisualExtraction")
       .then(async (res) => {
         const data = res as { lastVisualExtraction?: ExtractionResult };
-        if (!data.lastVisualExtraction) return;
+        const visualExtraction = data.lastVisualExtraction;
+        if (!visualExtraction) return;
 
-        setExtractedData(data.lastVisualExtraction);
+        setExtractedData(visualExtraction);
         setWasAutoCopied(true);
         setTimeout(() => setWasAutoCopied(false), 3000);
         await browser.storage.local.remove("lastVisualExtraction");
 
         setHistory((prev) => {
-          const entry = createHistoryEntry(
-            data.lastVisualExtraction,
-            "picker",
-            "MD",
-          );
+          const entry = createHistoryEntry(visualExtraction, "picker", "MD");
           const next = insertHistoryEntry(prev, entry, MAX_HISTORY);
           saveHistoryToDb(next).catch(console.error);
           return next;
