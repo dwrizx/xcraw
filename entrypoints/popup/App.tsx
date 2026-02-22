@@ -140,11 +140,13 @@ function App() {
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
   const [savedAiUrls, setSavedAiUrls] = useState<SavedAiUrl[]>([]);
   const [activeSavedUrlId, setActiveSavedUrlId] = useState<string | null>(null);
+  const [editingAiUrlId, setEditingAiUrlId] = useState<string | null>(null);
   const [newAiUrlName, setNewAiUrlName] = useState("");
   const [urlWarning, setUrlWarning] = useState<string | null>(null);
   const [newPromptName, setNewPromptName] = useState("");
   const [newPromptText, setNewPromptText] = useState("");
   const [promptWarning, setPromptWarning] = useState<string | null>(null);
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
 
   useEffect(() => {
     const uiState = loadLocalState<{
@@ -431,6 +433,20 @@ function App() {
     setUrlWarning(null);
   };
 
+  const handleEditAiUrl = (item: SavedAiUrl) => {
+    setEditingAiUrlId(item.id);
+    setNewAiUrlName(item.name);
+    setAiProvider(item.provider);
+    setAiUrl(item.url);
+    setUrlWarning(null);
+  };
+
+  const handleCancelEditAiUrl = () => {
+    setEditingAiUrlId(null);
+    setNewAiUrlName("");
+    setUrlWarning(null);
+  };
+
   const handleSaveAiUrl = () => {
     const sanitizedUrl = sanitizeAiUrl(aiUrl);
     const name = newAiUrlName.trim();
@@ -444,13 +460,18 @@ function App() {
     }
 
     setSavedAiUrls((prev) => {
-      const existing = prev.find(
+      const existingByEditId = editingAiUrlId
+        ? prev.find((item) => item.id === editingAiUrlId)
+        : null;
+      const existingByName = prev.find(
         (item) =>
           item.provider === aiProvider &&
           item.name.toLowerCase() === name.toLowerCase(),
       );
+      const existing = existingByEditId ?? existingByName;
+
       const nextItem: SavedAiUrl = existing
-        ? { ...existing, url: sanitizedUrl }
+        ? { ...existing, name, url: sanitizedUrl, provider: aiProvider }
         : {
             id: `url_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             name,
@@ -464,6 +485,7 @@ function App() {
     });
     setAiUrl(sanitizedUrl);
     setActiveSavedUrlId(null);
+    setEditingAiUrlId(null);
     setNewAiUrlName("");
     setUrlWarning(null);
   };
@@ -472,6 +494,9 @@ function App() {
     setSavedAiUrls((prev) => prev.filter((item) => item.id !== id));
     if (activeSavedUrlId === id) {
       setActiveSavedUrlId(null);
+    }
+    if (editingAiUrlId === id) {
+      handleCancelEditAiUrl();
     }
   };
 
@@ -484,6 +509,20 @@ function App() {
   const applySavedPrompt = (saved: SavedPrompt) => {
     setSelectedPromptTemplate(saved.id);
     setAiPrompt(saved.prompt);
+    setPromptWarning(null);
+  };
+
+  const handleEditSavedPrompt = (item: SavedPrompt) => {
+    setEditingPromptId(item.id);
+    setNewPromptName(item.name);
+    setNewPromptText(item.prompt);
+    setPromptWarning(null);
+  };
+
+  const handleCancelEditPrompt = () => {
+    setEditingPromptId(null);
+    setNewPromptName("");
+    setNewPromptText("");
     setPromptWarning(null);
   };
 
@@ -503,11 +542,16 @@ function App() {
     }
 
     setSavedPrompts((prev) => {
-      const existing = prev.find(
+      const existingByEditId = editingPromptId
+        ? prev.find((item) => item.id === editingPromptId)
+        : null;
+      const existingByName = prev.find(
         (item) => item.name.toLowerCase() === name.toLowerCase(),
       );
+      const existing = existingByEditId ?? existingByName;
+
       const nextItem: SavedPrompt = existing
-        ? { ...existing, prompt }
+        ? { ...existing, name, prompt }
         : {
             id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             name,
@@ -522,6 +566,7 @@ function App() {
 
     setSelectedPromptTemplate("custom");
     setAiPrompt(prompt);
+    setEditingPromptId(null);
     setNewPromptName("");
     setNewPromptText("");
     setPromptWarning(null);
@@ -532,6 +577,9 @@ function App() {
     if (selectedPromptTemplate === id) {
       setSelectedPromptTemplate("summary_5_points");
       setAiPrompt(DEFAULT_AI_PROMPT);
+    }
+    if (editingPromptId === id) {
+      handleCancelEditPrompt();
     }
   };
 
@@ -872,7 +920,7 @@ function App() {
             </div>
             <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3 bg-white/70 dark:bg-slate-900/40">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Simpan URL Tujuan
+                {editingAiUrlId ? "Edit URL Tujuan" : "Simpan URL Tujuan"}
               </p>
               <input
                 type="text"
@@ -886,14 +934,25 @@ function App() {
                   {urlWarning}
                 </p>
               )}
-              <button
-                type="button"
-                onClick={handleSaveAiUrl}
-                className="w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
-              >
-                <Link2 className="w-4 h-4" />
-                Simpan URL Ini
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveAiUrl}
+                  className="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
+                >
+                  <Link2 className="w-4 h-4" />
+                  {editingAiUrlId ? "Update URL" : "Simpan URL Ini"}
+                </button>
+                {editingAiUrlId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditAiUrl}
+                    className="px-3 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold"
+                  >
+                    Batal
+                  </button>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
@@ -938,6 +997,13 @@ function App() {
                         className="px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-[9px] font-bold"
                       >
                         Gunakan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEditAiUrl(item)}
+                        className="px-2 py-1 rounded-md bg-amber-50 text-amber-700 text-[9px] font-bold"
+                      >
+                        Edit
                       </button>
                       <button
                         type="button"
@@ -1045,6 +1111,13 @@ function App() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => handleEditSavedPrompt(item)}
+                        className="px-2 py-1 rounded-md bg-amber-50 text-amber-700 text-[9px] font-bold"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteSavedPrompt(item.id)}
                         className="p-1 rounded-md bg-red-50 text-red-600"
                         title="Hapus prompt"
@@ -1058,7 +1131,7 @@ function App() {
             </div>
             <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3 bg-white/70 dark:bg-slate-900/40">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Tambah Prompt Baru
+                {editingPromptId ? "Edit Prompt" : "Tambah Prompt Baru"}
               </p>
               <input
                 type="text"
@@ -1078,14 +1151,25 @@ function App() {
                   {promptWarning}
                 </p>
               )}
-              <button
-                type="button"
-                onClick={handleSavePromptTemplate}
-                className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
-              >
-                <PlusCircle className="w-4 h-4" />
-                Simpan Prompt
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleSavePromptTemplate}
+                  className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  {editingPromptId ? "Update Prompt" : "Simpan Prompt"}
+                </button>
+                {editingPromptId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditPrompt}
+                    className="px-3 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold"
+                  >
+                    Batal
+                  </button>
+                )}
+              </div>
             </div>
           </section>
         </main>
