@@ -1,12 +1,15 @@
 import { useState, useMemo, useEffect } from "react";
 import { sendMessage } from "@/lib/messaging";
 import type {
+  AiProvider,
   ExtractionResult,
   ExtractionSource,
   HistoryEntry,
   OutputFormat,
 } from "@/lib/types";
 import {
+  AI_PROVIDER_URLS,
+  DEFAULT_AI_PROVIDER,
   DEFAULT_TEMPLATE,
   DEFAULT_AI_PROMPT,
   DEFAULT_AI_URL,
@@ -47,6 +50,7 @@ import {
   BrainCircuit,
   MessageSquare,
   History,
+  Bot,
   BookOpen,
   Layers,
   Lightbulb,
@@ -86,6 +90,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [customTemplate, setCustomTemplate] = useState(DEFAULT_TEMPLATE);
   const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
+  const [aiProvider, setAiProvider] = useState<AiProvider>(DEFAULT_AI_PROVIDER);
   const [selectedPromptTemplate, setSelectedPromptTemplate] =
     useState("summary_5_points");
   const [aiUrl, setAiUrl] = useState(DEFAULT_AI_URL);
@@ -109,16 +114,19 @@ function App() {
     const draftSettings = loadLocalState<{
       customTemplate: string;
       aiPrompt: string;
+      aiProvider: AiProvider;
       selectedPromptTemplate: string;
       aiUrl: string;
     }>(LOCAL_DRAFT_KEY, {
       customTemplate: DEFAULT_TEMPLATE,
       aiPrompt: DEFAULT_AI_PROMPT,
+      aiProvider: DEFAULT_AI_PROVIDER,
       selectedPromptTemplate: "summary_5_points",
       aiUrl: DEFAULT_AI_URL,
     });
     setCustomTemplate(draftSettings.customTemplate);
     setAiPrompt(draftSettings.aiPrompt);
+    setAiProvider(draftSettings.aiProvider);
     setSelectedPromptTemplate(draftSettings.selectedPromptTemplate);
     setAiUrl(draftSettings.aiUrl);
     setSavedPrompts(
@@ -156,16 +164,24 @@ function App() {
       .catch(console.error);
 
     browser.storage.sync
-      .get(["customTemplate", "aiPrompt", "selectedPromptTemplate", "aiUrl"])
+      .get([
+        "customTemplate",
+        "aiPrompt",
+        "aiProvider",
+        "selectedPromptTemplate",
+        "aiUrl",
+      ])
       .then((res) => {
         const data = res as {
           customTemplate?: string;
           aiPrompt?: string;
+          aiProvider?: AiProvider;
           selectedPromptTemplate?: string;
           aiUrl?: string;
         };
         if (data.customTemplate) setCustomTemplate(data.customTemplate);
         if (data.aiPrompt) setAiPrompt(data.aiPrompt);
+        if (data.aiProvider) setAiProvider(data.aiProvider);
         if (data.selectedPromptTemplate) {
           setSelectedPromptTemplate(data.selectedPromptTemplate);
         }
@@ -194,10 +210,11 @@ function App() {
     saveLocalState(LOCAL_DRAFT_KEY, {
       customTemplate,
       aiPrompt,
+      aiProvider,
       selectedPromptTemplate,
       aiUrl,
     });
-  }, [customTemplate, aiPrompt, selectedPromptTemplate, aiUrl]);
+  }, [customTemplate, aiPrompt, aiProvider, selectedPromptTemplate, aiUrl]);
 
   useEffect(() => {
     saveLocalState(LOCAL_PROMPT_LIBRARY_KEY, savedPrompts);
@@ -212,6 +229,7 @@ function App() {
     await browser.storage.sync.set({
       customTemplate,
       aiPrompt,
+      aiProvider,
       selectedPromptTemplate,
       aiUrl,
       customPromptLibrary: savedPrompts,
@@ -223,8 +241,14 @@ function App() {
   const resetSettings = () => {
     setCustomTemplate(DEFAULT_TEMPLATE);
     setAiPrompt(DEFAULT_AI_PROMPT);
+    setAiProvider(DEFAULT_AI_PROVIDER);
     setSelectedPromptTemplate("summary_5_points");
-    setAiUrl(DEFAULT_AI_URL);
+    setAiUrl(AI_PROVIDER_URLS[DEFAULT_AI_PROVIDER]);
+  };
+
+  const applyProvider = (provider: AiProvider) => {
+    setAiProvider(provider);
+    setAiUrl(AI_PROVIDER_URLS[provider]);
   };
 
   const applyPromptTemplate = (templateId: string) => {
@@ -361,8 +385,9 @@ function App() {
     try {
       if (typeof browser !== "undefined" && browser.storage) {
         await browser.storage.local.set({
-          pendingChatGPTUpload: {
-            text: fullText,
+          pendingAIUpload: {
+            provider: aiProvider,
+            text: aiProvider === "chatgpt" ? fullText : undefined,
             prompt: finalPrompt,
             title: extractedData.title,
           },
@@ -522,6 +547,43 @@ function App() {
               </h2>
             </div>
             <div>
+              <label className="block text-[10px] font-semibold mb-2 text-slate-600 dark:text-slate-400">
+                AI Provider
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyProvider("chatgpt")}
+                  className={`p-2 rounded-lg border text-left transition-all ${
+                    aiProvider === "chatgpt"
+                      ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
+                      : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  <p className="text-[10px] font-bold flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    ChatGPT
+                  </p>
+                  <p className="text-[9px] mt-1 opacity-80">OpenAI ChatGPT</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyProvider("gemini")}
+                  className={`p-2 rounded-lg border text-left transition-all ${
+                    aiProvider === "gemini"
+                      ? "bg-white dark:bg-slate-900 border-indigo-400 text-indigo-700 dark:text-indigo-300"
+                      : "bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  <p className="text-[10px] font-bold flex items-center gap-1.5">
+                    <Bot className="w-3.5 h-3.5" />
+                    Gemini
+                  </p>
+                  <p className="text-[9px] mt-1 opacity-80">Google Gemini</p>
+                </button>
+              </div>
+            </div>
+            <div>
               <label className="block text-[10px] font-semibold mb-1 text-slate-600 dark:text-slate-400">
                 AI Tool URL
               </label>
@@ -530,7 +592,7 @@ function App() {
                 className="w-full p-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
                 value={aiUrl}
                 onChange={(e) => setAiUrl(e.target.value)}
-                placeholder="https://chatgpt.com/"
+                placeholder={AI_PROVIDER_URLS[aiProvider]}
               />
             </div>
             <div>

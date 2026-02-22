@@ -1,18 +1,18 @@
 import type { PendingAIUpload } from "../lib/types";
 
 const PROMPT_SELECTORS = [
-  "#prompt-textarea",
-  "textarea#prompt-textarea",
-  'div#prompt-textarea[contenteditable="true"]',
-  'div[contenteditable="true"][data-testid*="prompt"]',
-  'div[contenteditable="true"][aria-label*="Message"]',
+  'rich-textarea div[contenteditable="true"]',
+  'div.ql-editor[contenteditable="true"]',
+  'div[contenteditable="true"][role="textbox"]',
+  'div[contenteditable="true"][aria-label*="prompt"]',
+  "textarea",
 ];
 
 const SEND_BUTTON_SELECTORS = [
-  'button[data-testid="send-button"]',
-  'button[type="submit"]',
   'button[aria-label*="Send"]',
   'button[aria-label*="Kirim"]',
+  'button[data-test-id*="send"]',
+  'button[type="submit"]',
 ];
 
 function getSendButton(root: ParentNode = document): HTMLButtonElement | null {
@@ -23,45 +23,20 @@ function getSendButton(root: ParentNode = document): HTMLButtonElement | null {
   return null;
 }
 
-function isUsablePromptElement(element: HTMLElement): boolean {
-  const style = window.getComputedStyle(element);
-  if (style.display === "none" || style.visibility === "hidden") {
-    return false;
-  }
-  if (element.getAttribute("aria-hidden") === "true") {
-    return false;
-  }
-  if (
-    element instanceof HTMLTextAreaElement &&
-    (element.disabled || element.readOnly)
-  ) {
-    return false;
-  }
-
-  if (element.isContentEditable) return true;
-  if (element instanceof HTMLTextAreaElement) return true;
-
-  return element.id === "prompt-textarea";
-}
-
 function getPromptInput(): HTMLElement | null {
   const sendButton = getSendButton();
-  const formRoot = sendButton?.closest("form");
+  const parent = sendButton?.closest("form, main, body");
 
-  if (formRoot) {
+  if (parent) {
     for (const selector of PROMPT_SELECTORS) {
-      const element = formRoot.querySelector(selector);
-      if (element instanceof HTMLElement && isUsablePromptElement(element)) {
-        return element;
-      }
+      const element = parent.querySelector(selector);
+      if (element instanceof HTMLElement) return element;
     }
   }
 
   for (const selector of PROMPT_SELECTORS) {
     const element = document.querySelector(selector);
-    if (element instanceof HTMLElement && isUsablePromptElement(element)) {
-      return element;
-    }
+    if (element instanceof HTMLElement) return element;
   }
   return null;
 }
@@ -101,28 +76,15 @@ function setPromptValue(element: HTMLElement, value: string): void {
   );
 }
 
-function attachTextAsFile(
-  fileInput: HTMLInputElement,
-  text: string,
-  title?: string,
-) {
-  const safeTitle = (title || "SmartExtract").replace(/[^a-z0-9]/gi, "_");
-  const file = new File([text], `${safeTitle}.txt`, { type: "text/plain" });
-  const dataTransfer = new DataTransfer();
-  dataTransfer.items.add(file);
-  fileInput.files = dataTransfer.files;
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 export default defineContentScript({
-  matches: ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+  matches: ["https://gemini.google.com/*"],
   main() {
     let isProcessing = false;
 
-    const clickSendWithRetry = (maxAttempts = 15) => {
-      let sendAttempts = 0;
+    const clickSendWithRetry = (maxAttempts = 18) => {
+      let attempts = 0;
       const tryClick = () => {
-        sendAttempts++;
+        attempts++;
         const sendButton = getSendButton();
         if (sendButton && !sendButton.disabled) {
           sendButton.click();
@@ -132,30 +94,27 @@ export default defineContentScript({
       };
 
       if (tryClick()) return;
-
       const timer = window.setInterval(() => {
-        if (tryClick() || sendAttempts >= maxAttempts) {
+        if (tryClick() || attempts >= maxAttempts) {
           window.clearInterval(timer);
         }
       }, 300);
     };
 
     const processPendingUpload = (data: PendingAIUpload) => {
-      if (data.provider !== "chatgpt") return;
+      if (data.provider !== "gemini") return;
       if (isProcessing) return;
       isProcessing = true;
 
       let attempts = 0;
-      const maxAttempts = 25;
+      const maxAttempts = 30;
 
-      const attemptAutoFill = () => {
+      const tryFill = () => {
         attempts++;
         const promptInput = getPromptInput();
-        const fileInput = document.querySelector('input[type="file"]');
-
         if (!promptInput) {
           if (attempts < maxAttempts) {
-            window.setTimeout(attemptAutoFill, 400);
+            window.setTimeout(tryFill, 400);
           } else {
             isProcessing = false;
           }
@@ -163,35 +122,27 @@ export default defineContentScript({
         }
 
         try {
-          const promptText = data.prompt || "";
-          const fileAttached = fileInput instanceof HTMLInputElement;
-
-          if (data.text && fileAttached) {
-            attachTextAsFile(fileInput, data.text, data.title);
-          }
-
-          const mergedPrompt = promptText || data.text || "";
-
+          const mergedPrompt = data.prompt || data.text || "";
           if (mergedPrompt) {
             setPromptValue(promptInput, mergedPrompt);
           }
 
           browser.storage.local.remove("pendingAIUpload");
-          window.setTimeout(() => clickSendWithRetry(), 600);
+          window.setTimeout(() => clickSendWithRetry(), 700);
         } catch (err) {
-          console.error("SmartExtract error auto-filling:", err);
+          console.error("SmartExtract Gemini autofill error:", err);
         } finally {
           isProcessing = false;
         }
       };
 
-      window.setTimeout(attemptAutoFill, 900);
+      window.setTimeout(tryFill, 1000);
     };
 
     browser.storage.local.get("pendingAIUpload").then((res) => {
       const data = res.pendingAIUpload as PendingAIUpload | undefined;
       if (data) {
-        console.log("SmartExtract: Pending AI upload found for ChatGPT.", data);
+        console.log("SmartExtract: Pending AI upload found for Gemini.", data);
         processPendingUpload(data);
       }
     });
